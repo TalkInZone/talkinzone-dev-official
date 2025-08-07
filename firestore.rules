@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Protezione dati utente
+    match /datiutenti/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Protezione messaggi vocali
+    match /messages/{messageId} {
+      // Chiunque può leggere i messaggi
+      allow read: if true;
+      
+      // Solo utenti autenticati possono creare messaggi
+      allow create: if request.auth != null;
+      
+      // Solo il creatore può aggiornare (es: incrementare views)
+      allow update: if request.auth != null && request.auth.uid == resource.data.senderId;
+      
+      // Solo il creatore può eliminare (ma nella nostra app non usiamo delete dal client)
+      allow delete: if false; // Disabilitato per sicurezza
+    }
+    
+    // Protezione versione app
+    match /applicazioneversione/informazione {
+      allow read: if true;
+      allow write: if false; // Solo da console Firebase
+    }
+  }
+}

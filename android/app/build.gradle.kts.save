@@ -1,0 +1,169 @@
+import com.android.build.api.dsl.ApplicationExtension
+import java.util.Properties
+import java.io.FileInputStream
+
+plugins {
+    id("com.android.application")
+    kotlin("android")
+    id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+android {
+    namespace = "com.company.talkinzone"
+    compileSdk = 34
+    ndkVersion = "25.2.9519653"
+
+    val keystorePropertiesFile = rootProject.file("key.properties")
+    val keystoreProperties = Properties().apply {
+        if (keystorePropertiesFile.exists()) {
+            load(FileInputStream(keystorePropertiesFile))
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as? String ?: ""
+            keyPassword = keystoreProperties["keyPassword"] as? String ?: ""
+            storeFile = keystoreProperties["storeFile"]?.let { file(it as String) } ?: file("")
+            storePassword = keystoreProperties["storePassword"] as? String ?: ""
+        }
+    }
+
+    defaultConfig {
+        buildToolsVersion = "34.0.0"
+        applicationId = "com.company.talkinzone"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 2
+        versionName = "1.0.1"
+        multiDexEnabled = true
+        manifestPlaceholders["appAuthRedirectScheme"] = applicationId.toString()
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        getByName("debug") {
+            isDebuggable = true
+            manifestPlaceholders["appAuthRedirectScheme"] = "com.company.talkinzone.debug"
+        }
+    }
+    
+packagingOptions {
+    resources {
+        excludes.addAll(listOf(
+            "META-INF/*",
+            "META-INF/NOTICE.md",
+            "META-INF/LICENSE.md",
+            "META-INF/AL2.0",
+            "META-INF/LGPL2.1",
+            "META-INF/DEPENDENCIES"
+        ))
+        
+        pickFirsts.addAll(listOf(
+            "lib/armeabi-v7a/libc++_shared.so",
+            "lib/arm64-v8a/libc++_shared.so",
+            "lib/x86/libc++_shared.so",
+            "lib/x86_64/libc++_shared.so",
+            "lib/arm64-v8a/libflutter.so"
+        ))
+    }
+    
+    jniLibs {
+        useLegacyPackaging = true
+    }
+}
+    
+    buildFeatures {
+        viewBinding = true
+    }
+    
+    lint {
+        disable.addAll(listOf("InvalidPackage", "Instantiatable"))
+        abortOnError = false
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    // ✅ FIREBASE BOM PIÙ VECCHIO E STABILE
+    implementation(platform("com.google.firebase:firebase-bom:30.5.0"))
+    implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    
+    // Google Play Services - versioni molto stabili
+    implementation("com.google.android.gms:play-services-base:18.1.0")
+    implementation("com.google.android.gms:play-services-auth:20.4.1")
+    implementation("com.google.android.gms:play-services-location:20.0.0")
+    
+    // ✅ RISOLVI IL CONFLITTO PLAY CORE
+    implementation("com.google.android.play:core-ktx:1.8.1") {
+        exclude(group = "com.google.android.play", module = "core")
+    }
+    // Usa SOLO core-ktx, non entrambi
+    
+    // AndroidX - versioni compatibili
+    implementation("androidx.browser:browser:1.6.0")
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.core:core-ktx:1.10.1")
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
+    
+    // ✅ KOTLIN VERSIONE COMPATIBILE
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+}
+
+// ✅ RISOLUZIONE FORZATA DEI CONFLITTI PIÙ AGGRESSIVA
+configurations.all {
+    resolutionStrategy {
+        force("androidx.core:core:1.10.1")
+        force("androidx.core:core-ktx:1.10.1")
+        // Forza versioni compatibili
+        force("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22")
+        
+        // ✅ FORZA VERSIONI FIREBASE SPECIFICHE
+        force("com.google.firebase:firebase-auth:21.3.0")
+        force("com.google.firebase:firebase-auth-ktx:21.3.0")
+        force("com.google.firebase:firebase-analytics:21.2.0")
+        force("com.google.firebase:firebase-analytics-ktx:21.2.0")
+        force("com.google.firebase:firebase-firestore:24.4.5")
+        force("com.google.firebase:firebase-firestore-ktx:24.4.5")
+        force("com.google.firebase:firebase-messaging:23.1.2")
+        force("com.google.firebase:firebase-messaging-ktx:23.1.2")
+        
+        // ✅ FORZA VERSIONI PLAY SERVICES COMPATIBILI
+        force("com.google.android.gms:play-services-measurement-api:21.2.0")
+        force("com.google.android.gms:play-services-measurement-impl:21.2.0")
+    }
+}

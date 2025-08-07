@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "282305776445",
+    "firebase_url": "https://talkinzone-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "talkinzone",
+    "storage_bucket": "talkinzone.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:282305776445:android:b150b333b6a6ab57001354",
+        "android_client_info": {
+          "package_name": "com.company.talkinzone"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "282305776445-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8_AZJuxgXSEokPF93YlaJCayhpxS7Gsw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "282305776445-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
