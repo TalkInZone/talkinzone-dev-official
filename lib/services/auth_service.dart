@@ -65,7 +65,7 @@ class AuthService {
       debugPrint("🔑 [4/6] Richiedo token di autenticazione...");
       final GoogleSignInAuthentication googleAuth;
       try {
-      googleAuth = googleUser!.authentication as GoogleSignInAuthentication;
+     googleAuth = await googleUser!.authentication;
       } on PlatformException catch (e) {
         debugPrint(
           "❌ PlatformException durante auth: [${e.code}] ${e.message}",

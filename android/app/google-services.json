@@ -3,7 +3,7 @@
     "project_number": "282305776445",
     "firebase_url": "https://talkinzone-default-rtdb.europe-west1.firebasedatabase.app",
     "project_id": "talkinzone",
-    "storage_bucket": "talkinzone.appspot.com"
+    "storage_bucket": "talkinzone.firebasestorage.app"
   },
   "client": [
     {
@@ -15,7 +15,23 @@
       },
       "oauth_client": [
         {
-          "client_id": "282305776445-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+          "client_id": "282305776445-gp8jgso1233tuq16oolnk0ekdub3pbfl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.company.talkinzone",
+            "certificate_hash": "7e3d32b22a528298e24d3945a761f3879a8fc214"
+          }
+        },
+        {
+          "client_id": "282305776445-jooneepgjg8q7t92f00841c867rrve7a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.company.talkinzone",
+            "certificate_hash": "b944e6185be710f1e20889f4b8ab570e843e11b8"
+          }
+        },
+        {
+          "client_id": "282305776445-rumrd5h2kb4mt7e8g6pdkfqpjmi2sk3l.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
@@ -28,7 +44,7 @@
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "282305776445-xxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+              "client_id": "282305776445-rumrd5h2kb4mt7e8g6pdkfqpjmi2sk3l.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

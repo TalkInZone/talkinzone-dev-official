@@ -357,41 +357,37 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children:
-                        widget.radiusOptions.map((radius) {
-                          final isSelected = widget.selectedRadius == radius;
-                          return ChoiceChip(
-                            label: Text(
-                              radius < 1000
-                                  ? '${radius.toInt()} m'
-                                  : '${(radius / 1000).toInt()} km',
-                            ),
-                            selected: isSelected,
-                            onSelected: (selected) {
-                              if (selected) {
-                                widget.onCategorySelected(
-                                  widget.selectedCategory,
-                                );
-                              }
-                            },
-                            selectedColor: Colors.blue[100],
-                            backgroundColor: Colors.grey[200],
-                            labelStyle: TextStyle(
-                              color:
-                                  isSelected
-                                      ? Colors.blue[800]
-                                      : Colors.black87,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                          );
-                        }).toList(),
+                    children: widget.radiusOptions.map((radius) {
+                      final isSelected = widget.selectedRadius == radius;
+                      return ChoiceChip(
+                        label: Text(
+                          radius < 1000
+                              ? '${radius.toInt()} m'
+                              : '${(radius / 1000).toInt()} km',
+                        ),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          if (selected) {
+                            widget.onCategorySelected(
+                              widget.selectedCategory,
+                            );
+                          }
+                        },
+                        selectedColor: Colors.blue[100],
+                        backgroundColor: Colors.grey[200],
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.blue[800] : Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      );
+                    }).toList(),
                   ),
                   const SizedBox(height: 16),
 
@@ -528,351 +524,330 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
           Expanded(
             child: Container(
               padding: const EdgeInsets.all(16),
-              child:
-                  widget.filteredMessages.isEmpty
-                      ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.mic_none,
-                              size: 64,
-                              color: Colors.grey[400],
+              child: widget.filteredMessages.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.mic_none,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            widget.filteredMessages.isEmpty
+                                ? 'Nessun messaggio vocale nelle vicinanze'
+                                : 'Nessun messaggio per i filtri selezionati',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
                             ),
-                            const SizedBox(height: 16),
-                            Text(
-                              widget.filteredMessages.isEmpty
-                                  ? 'Nessun messaggio vocale nelle vicinanze'
-                                  : 'Nessun messaggio per i filtri selezionati',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
-                              textAlign: TextAlign.center,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            widget.selectedRadius < 1000
+                                ? 'Raggio di visualizzazione: ${widget.selectedRadius.toInt()} metri'
+                                : 'Raggio di visualizzazione: ${(widget.selectedRadius / 1000).toStringAsFixed(1)} km',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey,
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              widget.selectedRadius < 1000
-                                  ? 'Raggio di visualizzazione: ${widget.selectedRadius.toInt()} metri'
-                                  : 'Raggio di visualizzazione: ${(widget.selectedRadius / 1000).toStringAsFixed(1)} km',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                      : ListView.builder(
-                        reverse: true,
-                        itemCount: widget.filteredMessages.length,
-                        itemBuilder: (context, index) {
-                          final message = widget.filteredMessages[index];
-                          final isPlaying =
-                              widget.playingMessageId == message.id;
-                          final isCurrentUser =
-                              message.senderId == widget.currentUserId;
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      reverse: true,
+                      itemCount: widget.filteredMessages.length,
+                      itemBuilder: (context, index) {
+                        final message = widget.filteredMessages[index];
+                        final isPlaying = widget.playingMessageId == message.id;
+                        final isCurrentUser =
+                            message.senderId == widget.currentUserId;
 
-                          // 🧩 Calcolo distanza
-                          // ↪️ Determina prossimità messaggio
-                          double? distance;
-                          if (widget.currentPosition != null) {
-                            distance = Geolocator.distanceBetween(
-                              widget.currentPosition!.latitude,
-                              widget.currentPosition!.longitude,
-                              message.latitude,
-                              message.longitude,
-                            );
-                          }
+                        // 🧩 Calcolo distanza
+                        // ↪️ Determina prossimità messaggio
+                        double? distance;
+                        if (widget.currentPosition != null) {
+                          distance = Geolocator.distanceBetween(
+                            widget.currentPosition!.latitude,
+                            widget.currentPosition!.longitude,
+                            message.latitude,
+                            message.longitude,
+                          );
+                        }
 
-                          return GestureDetector(
-                            onTap: () => widget.onPlayMessage(message),
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              child: Align(
-                                alignment:
-                                    isCurrentUser
-                                        ? Alignment.centerRight
-                                        : Alignment.centerLeft,
-                                child: Container(
-                                  constraints: BoxConstraints(
-                                    maxWidth:
-                                        MediaQuery.of(context).size.width *
-                                        0.75,
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: message.category.color.withAlpha(25),
-                                    borderRadius: BorderRadius.only(
-                                      topLeft: const Radius.circular(18),
-                                      topRight: const Radius.circular(18),
-                                      bottomLeft: Radius.circular(
-                                        isCurrentUser ? 18 : 4,
-                                      ),
-                                      bottomRight: Radius.circular(
-                                        isCurrentUser ? 4 : 18,
-                                      ),
+                        return GestureDetector(
+                          onTap: () => widget.onPlayMessage(message),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: Align(
+                              alignment: isCurrentUser
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                constraints: BoxConstraints(
+                                  maxWidth:
+                                      MediaQuery.of(context).size.width * 0.75,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: message.category.color.withAlpha(25),
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(18),
+                                    topRight: const Radius.circular(18),
+                                    bottomLeft: Radius.circular(
+                                      isCurrentUser ? 18 : 4,
                                     ),
-                                    border: Border.all(
-                                      color: message.category.color,
-                                      width: 1.5,
+                                    bottomRight: Radius.circular(
+                                      isCurrentUser ? 4 : 18,
                                     ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withAlpha(25),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // 🧩 Intestazione messaggio
-                                      // ↪️ Mostra categoria e distanza
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
+                                  border: Border.all(
+                                    color: message.category.color,
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withAlpha(25),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 🧩 Intestazione messaggio
+                                    // ↪️ Mostra categoria e distanza
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              message.category.icon,
+                                              size: 14,
+                                              color: message.category.color,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              message.category.label,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: message.category.color,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (distance != null)
                                           Row(
                                             children: [
                                               Icon(
-                                                message.category.icon,
-                                                size: 14,
-                                                color: message.category.color,
+                                                Icons.place,
+                                                size: 12,
+                                                color: Colors.grey[600],
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                message.category.label,
+                                                _formatDistanceGenerically(
+                                                  distance,
+                                                ),
                                                 style: TextStyle(
                                                   fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: message.category.color,
+                                                  color: Colors.grey[600],
                                                 ),
                                               ),
                                             ],
                                           ),
-                                          if (distance != null)
-                                            Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.place,
-                                                  size: 12,
-                                                  color: Colors.grey[600],
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  _formatDistanceGenerically(
-                                                    distance,
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
 
-                                      // 🧩 Corpo messaggio
-                                      // ↪️ Controllo riproduzione e metadati
-                                      Row(
-                                        children: [
-                                          // 🧩 Pulsante play/stop
-                                          // ↪️ Gestisce riproduzione audio
-                                          Container(
-                                            width: 40,
-                                            height: 40,
-                                            decoration: BoxDecoration(
-                                              color:
-                                                  isPlaying
-                                                      ? Colors.red
-                                                      : message.category.color,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Icon(
-                                              isPlaying
-                                                  ? Icons.stop
-                                                  : Icons.play_arrow,
-                                              color: Colors.white,
-                                            ),
+                                    // 🧩 Corpo messaggio
+                                    // ↪️ Controllo riproduzione e metadati
+                                    Row(
+                                      children: [
+                                        // 🧩 Pulsante play/stop
+                                        // ↪️ Gestisce riproduzione audio
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color: isPlaying
+                                                ? Colors.red
+                                                : message.category.color,
+                                            shape: BoxShape.circle,
                                           ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment
-                                                          .spaceBetween,
-                                                  children: [
-                                                    // 🧩 Mittente
-                                                    Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.person,
-                                                          size: 12,
-                                                          color:
-                                                              isCurrentUser
-                                                                  ? message
-                                                                      .category
-                                                                      .color
-                                                                  : Colors
-                                                                      .grey[600],
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 4,
-                                                        ),
-                                                        Text(
-                                                          _getSenderDisplayName(
-                                                            message,
-                                                          ),
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                            color:
-                                                                isCurrentUser
-                                                                    ? message
-                                                                        .category
-                                                                        .color
-                                                                    : Colors
-                                                                        .grey[600],
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    // 🧩 Durata audio
-                                                    Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.graphic_eq,
-                                                          size: 16,
-                                                          color:
-                                                              message
-                                                                  .category
-                                                                  .color,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 4,
-                                                        ),
-                                                        Text(
-                                                          _formatDuration(
-                                                            message.duration,
-                                                          ),
-                                                          style: TextStyle(
-                                                            fontSize: 14,
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                            color:
-                                                                message
-                                                                    .category
-                                                                    .color,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment
-                                                          .spaceBetween,
-                                                  children: [
-                                                    // 🧩 Tempo trascorso
-                                                    Text(
-                                                      _getTimeAgo(
-                                                        message.timestamp,
+                                          child: Icon(
+                                            isPlaying
+                                                ? Icons.stop
+                                                : Icons.play_arrow,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .spaceBetween,
+                                                children: [
+                                                  // 🧩 Mittente
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.person,
+                                                        size: 12,
+                                                        color: isCurrentUser
+                                                            ? message
+                                                                .category.color
+                                                            : Colors.grey[600],
                                                       ),
-                                                      style: TextStyle(
-                                                        fontSize: 12,
+                                                      const SizedBox(
+                                                        width: 4,
+                                                      ),
+                                                      Text(
+                                                        _getSenderDisplayName(
+                                                          message,
+                                                        ),
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                          color: isCurrentUser
+                                                              ? message.category
+                                                                  .color
+                                                              : Colors
+                                                                  .grey[600],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  // 🧩 Durata audio
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.graphic_eq,
+                                                        size: 16,
+                                                        color: message
+                                                            .category.color,
+                                                      ),
+                                                      const SizedBox(
+                                                        width: 4,
+                                                      ),
+                                                      Text(
+                                                        _formatDuration(
+                                                          message.duration,
+                                                        ),
+                                                        style: TextStyle(
+                                                          fontSize: 14,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                          color: message
+                                                              .category.color,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .spaceBetween,
+                                                children: [
+                                                  // 🧩 Tempo trascorso
+                                                  Text(
+                                                    _getTimeAgo(
+                                                      message.timestamp,
+                                                    ),
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: message
+                                                          .category.color,
+                                                    ),
+                                                  ),
+                                                  // 🧩 Tempo rimanente
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons.timer,
+                                                        size: 12,
                                                         color:
-                                                            message
-                                                                .category
-                                                                .color,
+                                                            Colors.orange[700],
                                                       ),
-                                                    ),
-                                                    // 🧩 Tempo rimanente
-                                                    Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.timer,
-                                                          size: 12,
-                                                          color:
-                                                              Colors
-                                                                  .orange[700],
+                                                      const SizedBox(
+                                                        width: 2,
+                                                      ),
+                                                      Text(
+                                                        _getTimeRemaining(
+                                                          message.timestamp,
                                                         ),
-                                                        const SizedBox(
-                                                          width: 2,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors
+                                                              .orange[700],
+                                                          fontWeight:
+                                                              FontWeight.w500,
                                                         ),
-                                                        Text(
-                                                          _getTimeRemaining(
-                                                            message.timestamp,
-                                                          ),
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            color:
-                                                                Colors
-                                                                    .orange[700],
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
 
-                                      // 🧩 Visualizzazioni
-                                      // ↪️ Mostra conteggio visualizzazioni
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.end,
-                                        children: [
-                                          Icon(
-                                            Icons.remove_red_eye,
-                                            size: 14,
-                                            color: Colors.grey[600],
+                                    // 🧩 Visualizzazioni
+                                    // ↪️ Mostra conteggio visualizzazioni
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        Icon(
+                                          Icons.remove_red_eye,
+                                          size: 14,
+                                          color: Colors.grey[600],
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          message.views > 0
+                                              ? '${message.views}'
+                                              : 'Nuovo',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: message.views > 0
+                                                ? Colors.grey[600]
+                                                : Colors.orange,
+                                            fontWeight: FontWeight.bold,
                                           ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            message.views > 0
-                                                ? '${message.views}'
-                                                : 'Nuovo',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  message.views > 0
-                                                      ? Colors.grey[600]
-                                                      : Colors.orange,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ),
 
@@ -938,10 +913,9 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       return AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         width: 4,
-                        height:
-                            widget.recordingSeconds % 3 == index % 3
-                                ? 30 - index * 5
-                                : 20 - index * 3,
+                        height: widget.recordingSeconds % 3 == index % 3
+                            ? 30 - index * 5
+                            : 20 - index * 3,
                         margin: const EdgeInsets.symmetric(horizontal: 2),
                         decoration: BoxDecoration(
                           color: widget.selectedCategory.color,
@@ -998,18 +972,16 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                   onPointerUp: (_) => widget.onPressEnd(),
                   onPointerCancel: (_) => widget.onPressEnd(),
                   child: GestureDetector(
-                    onTap:
-                        widget.isRecording
-                            ? widget.onStopRecording
-                            : widget.onStartRecording,
+                    onTap: widget.isRecording
+                        ? widget.onStopRecording
+                        : widget.onStartRecording,
                     child: Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color:
-                            widget.isRecording
-                                ? widget.selectedCategory.color
-                                : Colors.blue,
+                        color: widget.isRecording
+                            ? widget.selectedCategory.color
+                            : Colors.blue,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
@@ -1092,37 +1064,36 @@ class FilterSelector extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children:
-                MessageCategory.values.map((category) {
-                  final isActive = activeFilters.contains(category);
-                  return FilterChip(
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          category.icon,
-                          size: 16,
-                          color: isActive ? Colors.white : category.color,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          category.label,
-                          style: TextStyle(
-                            color: isActive ? Colors.white : Colors.black,
-                          ),
-                        ),
-                      ],
+            children: MessageCategory.values.map((category) {
+              final isActive = activeFilters.contains(category);
+              return FilterChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      category.icon,
+                      size: 16,
+                      color: isActive ? Colors.white : category.color,
                     ),
-                    selected: isActive,
-                    onSelected: (selected) => onFilterToggled(category),
-                    selectedColor: category.color,
-                    backgroundColor: Colors.grey[200],
-                    checkmarkColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                    const SizedBox(width: 4),
+                    Text(
+                      category.label,
+                      style: TextStyle(
+                        color: isActive ? Colors.white : Colors.black,
+                      ),
                     ),
-                  );
-                }).toList(),
+                  ],
+                ),
+                selected: isActive,
+                onSelected: (selected) => onFilterToggled(category),
+                selectedColor: category.color,
+                backgroundColor: Colors.grey[200],
+                checkmarkColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -1182,35 +1153,33 @@ class CategorySelector extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children:
-                MessageCategory.values.map((category) {
-                  return ChoiceChip(
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(category.icon, size: 16, color: category.color),
-                        const SizedBox(width: 4),
-                        Text(category.label),
-                      ],
-                    ),
-                    selected: selectedCategory == category,
-                    onSelected: (selected) {
-                      if (selected) onCategorySelected(category);
-                    },
-                    selectedColor: category.color.withAlpha(50),
-                    backgroundColor: Colors.grey[200],
-                    labelStyle: TextStyle(
-                      color:
-                          selectedCategory == category
-                              ? category.color
-                              : Colors.black,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  );
-                }).toList(),
+            children: MessageCategory.values.map((category) {
+              return ChoiceChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(category.icon, size: 16, color: category.color),
+                    const SizedBox(width: 4),
+                    Text(category.label),
+                  ],
+                ),
+                selected: selectedCategory == category,
+                onSelected: (selected) {
+                  if (selected) onCategorySelected(category);
+                },
+                selectedColor: category.color.withAlpha(50),
+                backgroundColor: Colors.grey[200],
+                labelStyle: TextStyle(
+                  color: selectedCategory == category
+                      ? category.color
+                      : Colors.black,
+                  fontWeight: FontWeight.w500,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),

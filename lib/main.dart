@@ -14,8 +14,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'settings.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-// RIMOSSO: import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-// AGGIUNTO: Workmanager
 import 'package:workmanager/workmanager.dart';
 import 'services/storj_service.dart';
 import 'update_required_screen.dart';
@@ -23,7 +21,6 @@ import 'category_utils.dart';
 import 'home_screen_ui.dart';
 import 'voice_message.dart';
 
-// AGGIUNTO: Callback per Workmanager
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
@@ -34,7 +31,6 @@ void callbackDispatcher() {
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
@@ -47,6 +43,7 @@ class AuthService {
       try {
         await _googleSignIn.signOut();
         await _auth.signOut();
+        debugPrint("✅ Logout effettuato con successo");
       } catch (e) {
         debugPrint("⚠️ Errore durante il logout: $e");
       }
@@ -54,23 +51,29 @@ class AuthService {
       final GoogleSignInAccount? googleUser;
       try {
         googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          debugPrint("❌ L'utente ha annullato l'accesso");
+          return null;
+        }
+        debugPrint("✅ Account selezionato: ${googleUser.email}");
       } on PlatformException catch (e) {
-        if (e.code == 'sign_in_canceled') return null;
+        if (e.code == 'sign_in_canceled') {
+          debugPrint("❌ Accesso annullato dall'utente");
+          return null;
+        }
         debugPrint("❌ PlatformException durante signIn: ${e.message}");
         return null;
       } catch (e) {
         debugPrint("❌ Errore imprevisto durante signIn: $e");
         return null;
       }
-      // MODIFICA MINIMA QUI (RIGA 54)
-      debugPrint(
-          "✅ Account selezionato: ${googleUser?.email ?? 'Nessuna email'}");
 
       final GoogleSignInAuthentication googleAuth;
       try {
-        googleAuth = googleUser!.authentication as GoogleSignInAuthentication;
+        googleAuth = await googleUser.authentication;
+        debugPrint("✅ Token di autenticazione ottenuti");
       } catch (e) {
-        debugPrint("❌ Errore durante auth: $e");
+        debugPrint("❌ Errore durante l'autenticazione: $e");
         return null;
       }
 
@@ -88,9 +91,16 @@ class AuthService {
         final UserCredential userCredential =
             await _auth.signInWithCredential(credential);
 
-        if (userCredential.user == null) return null;
+        if (userCredential.user == null) {
+          debugPrint("❌ Nessun utente restituito da Firebase");
+          return null;
+        }
+
         debugPrint("🎉 Accesso riuscito! UID: ${userCredential.user!.uid}");
-        await _processUserData(userCredential.user!);
+
+        // Scrittura metadati utente in Firestore
+        await _saveUserData(userCredential.user!);
+
         return userCredential.user;
       } on FirebaseAuthException catch (e) {
         debugPrint("🔥 FirebaseAuthException: [${e.code}] ${e.message}");
@@ -105,14 +115,15 @@ class AuthService {
     }
   }
 
-  Future<void> _processUserData(User user) async {
+  Future<void> _saveUserData(User user) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_id', user.uid);
 
-      final userDoc = _firestore.collection('utenti').doc(user.uid);
+      final userDoc =
+          FirebaseFirestore.instance.collection('utenti').doc(user.uid);
+
       final userData = {
-        'id': user.uid,
         'provider': 'google',
         'email': user.email,
         'nome': user.displayName ?? 'Utente senza nome',
@@ -121,9 +132,27 @@ class AuthService {
         'ultimo_accesso': FieldValue.serverTimestamp(),
       };
 
+      debugPrint("📝 Tentativo di salvataggio dati utente in Firestore...");
+
       await userDoc.set(userData, SetOptions(merge: true));
+
+      debugPrint("✅ Dati utente salvati in Firestore per UID: ${user.uid}");
+
+      // Verifica immediata
+      final docSnapshot = await userDoc.get();
+      if (docSnapshot.exists) {
+        debugPrint("🎉 Verificato: documento utente esiste in Firestore");
+      } else {
+        debugPrint("❌ Documento non trovato dopo il salvataggio");
+      }
     } catch (e, stack) {
-      debugPrint('❌ Errore salvataggio dati utente: $e\n$stack');
+      debugPrint('💥 ERRORE CRITICO salvataggio dati utente: $e');
+      debugPrint('🔥 Stack trace: $stack');
+
+      if (e is FirebaseException) {
+        debugPrint("🔥 FIREBASE ERROR CODE: ${e.code}");
+        debugPrint("🔥 FIREBASE MESSAGE: ${e.message}");
+      }
     }
   }
 
@@ -135,13 +164,19 @@ class AuthService {
       await _googleSignIn.signOut();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_id');
+      debugPrint("✅ Disconnessione effettuata con successo");
     } catch (e, stack) {
       debugPrint("❌ Errore durante la disconnessione: $e\n$stack");
     }
   }
 
   void debugAuthConfiguration() {
-    debugPrint("🔧 DEBUG CONFIGURAZIONE AUTH");
+    try {
+      debugPrint("🔧 DEBUG CONFIGURAZIONE AUTH");
+      debugPrint("🔥 Firebase project ID: ${Firebase.app().options.projectId}");
+    } catch (e) {
+      debugPrint("❌ Errore debug configurazione: $e");
+    }
   }
 }
 
@@ -188,7 +223,6 @@ class NotificationService {
   }
 }
 
-// RIMOSSO: @pragma('vm:entry-point')
 Future<void> backgroundNotificationHandler() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -344,8 +378,10 @@ class LoginScreen extends StatelessWidget {
             const SizedBox(height: 40),
             ElevatedButton(
               onPressed: () async {
+                debugPrint("👉 Bottone di accesso premuto");
                 final user = await authService.signInWithGoogle();
                 if (user == null) {
+                  debugPrint("❌ Accesso fallito");
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -353,6 +389,8 @@ class LoginScreen extends StatelessWidget {
                       ),
                     );
                   }
+                } else {
+                  debugPrint("✅ Accesso riuscito, navigazione...");
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -463,7 +501,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   bool _isLongPressRecording = false;
   bool _isWaitingForRelease = false;
 
-  // Flag per gestire lo stato del widget
+  Map<String, dynamic>? _currentUserData;
+  bool _showUserInfo = false;
+
   bool _isDisposed = false;
 
   @override
@@ -494,6 +534,30 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       _showWelcomeMessage = isFirstLaunch;
       if (isFirstLaunch) prefs.setBool('first_launch', false);
     });
+
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      await _loadUserData();
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('utenti')
+          .doc(_currentUserId)
+          .get();
+
+      if (userDoc.exists) {
+        setState(() {
+          _currentUserData = userDoc.data() as Map<String, dynamic>;
+        });
+        debugPrint("✅ Dati utente caricati: $_currentUserData");
+      } else {
+        debugPrint("⚠️ Documento utente non trovato per ID: $_currentUserId");
+      }
+    } catch (e) {
+      debugPrint('❌ Errore caricamento dati utente: $e');
+    }
   }
 
   void _cleanupResources() {
@@ -652,10 +716,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       if (permission == LocationPermission.whileInUse ||
           permission == LocationPermission.always) {
-        // Utilizzo corretto di Geolocator con le nuove impostazioni
-        // Nuovo codice (corretto)
         _currentPosition = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium, // ✅ Usa desiredAccuracy
+          desiredAccuracy: LocationAccuracy.medium,
         );
 
         final prefs = await SharedPreferences.getInstance();
@@ -965,6 +1027,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
+  void _toggleUserInfo() {
+    setState(() {
+      _showUserInfo = !_showUserInfo;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -975,66 +1043,189 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           (!_showOnlyMyMessages || message.senderId == _currentUserId);
     }).toList();
 
-    return HomeScreenUI(
-      showWelcomeMessage: _showWelcomeMessage,
-      isInitialized: _isInitialized,
-      showRadiusSelector: _showRadiusSelector,
-      showFilterSelector: _showFilterSelector,
-      activeFilters: _activeFilters,
-      showCategorySelector: _showCategorySelector,
-      selectedCategory: _selectedCategory,
-      showOnlyMyMessages: _showOnlyMyMessages,
-      filteredMessages: filteredMessages,
-      currentUserId: _currentUserId,
-      currentPosition: _currentPosition,
-      selectedRadius: _selectedRadius,
-      isRecording: _isRecording,
-      recordingSeconds: _recordingSeconds,
-      isLongPressRecording: _isLongPressRecording,
-      isWaitingForRelease: _isWaitingForRelease,
-      playingMessageId: _playingMessageId,
-      radiusOptions: _radiusOptions,
-      onPlayMessage: _playMessage,
-      onToggleRadiusSelector: () => setState(() {
-        _showRadiusSelector = !_showRadiusSelector;
-        if (_showRadiusSelector) {
-          _showFilterSelector = false;
-          _showCategorySelector = false;
-        }
-      }),
-      onFilterToggled: (category) => setState(() {
-        if (_activeFilters.contains(category)) {
-          _activeFilters.remove(category);
-        } else {
-          _activeFilters.add(category);
-        }
-      }),
-      onToggleFilterSelector: () => setState(() {
-        _showFilterSelector = !_showFilterSelector;
-        if (_showFilterSelector) {
-          _showCategorySelector = false;
-          _showRadiusSelector = false;
-        }
-      }),
-      onCategorySelected: (category) => setState(() {
-        _selectedCategory = category;
-        _showCategorySelector = false;
-      }),
-      onToggleCategorySelector: () => setState(() {
-        _showCategorySelector = !_showCategorySelector;
-        if (_showCategorySelector) {
-          _showFilterSelector = false;
-          _showRadiusSelector = false;
-        }
-      }),
-      onToggleOnlyMyMessages: () =>
-          setState(() => _showOnlyMyMessages = !_showOnlyMyMessages),
-      onSettingsPressed: () => Navigator.pushNamed(context, '/settings'),
-      onPressStart: _handlePressStart,
-      onPressEnd: _handlePressEnd,
-      onStopRecording: _stopRecording,
-      onStartRecording: _startRecording,
-      onWelcomeDismissed: () => setState(() => _showWelcomeMessage = false),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('TalkInZone'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: _toggleUserInfo,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () => Navigator.pushNamed(context, '/settings'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          HomeScreenUI(
+            showWelcomeMessage: _showWelcomeMessage,
+            isInitialized: _isInitialized,
+            showRadiusSelector: _showRadiusSelector,
+            showFilterSelector: _showFilterSelector,
+            activeFilters: _activeFilters,
+            showCategorySelector: _showCategorySelector,
+            selectedCategory: _selectedCategory,
+            showOnlyMyMessages: _showOnlyMyMessages,
+            filteredMessages: filteredMessages,
+            currentUserId: _currentUserId,
+            currentPosition: _currentPosition,
+            selectedRadius: _selectedRadius,
+            isRecording: _isRecording,
+            recordingSeconds: _recordingSeconds,
+            isLongPressRecording: _isLongPressRecording,
+            isWaitingForRelease: _isWaitingForRelease,
+            playingMessageId: _playingMessageId,
+            radiusOptions: _radiusOptions,
+            onPlayMessage: _playMessage,
+            onToggleRadiusSelector: () => setState(() {
+              _showRadiusSelector = !_showRadiusSelector;
+              if (_showRadiusSelector) {
+                _showFilterSelector = false;
+                _showCategorySelector = false;
+              }
+            }),
+            onFilterToggled: (category) => setState(() {
+              if (_activeFilters.contains(category)) {
+                _activeFilters.remove(category);
+              } else {
+                _activeFilters.add(category);
+              }
+            }),
+            onToggleFilterSelector: () => setState(() {
+              _showFilterSelector = !_showFilterSelector;
+              if (_showFilterSelector) {
+                _showCategorySelector = false;
+                _showRadiusSelector = false;
+              }
+            }),
+            onCategorySelected: (category) => setState(() {
+              _selectedCategory = category;
+              _showCategorySelector = false;
+            }),
+            onToggleCategorySelector: () => setState(() {
+              _showCategorySelector = !_showCategorySelector;
+              if (_showCategorySelector) {
+                _showFilterSelector = false;
+                _showRadiusSelector = false;
+              }
+            }),
+            onToggleOnlyMyMessages: () =>
+                setState(() => _showOnlyMyMessages = !_showOnlyMyMessages),
+            onSettingsPressed: () => Navigator.pushNamed(context, '/settings'),
+            onPressStart: _handlePressStart,
+            onPressEnd: _handlePressEnd,
+            onStopRecording: _stopRecording,
+            onStartRecording: _startRecording,
+            onWelcomeDismissed: () =>
+                setState(() => _showWelcomeMessage = false),
+          ),
+          if (_showUserInfo && _currentUserData != null)
+            Positioned(
+              top: 60,
+              right: 10,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      // ignore: deprecated_member_use
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                    )
+                  ],
+                ),
+                width: 250,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Il tuo account',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[800],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: _toggleUserInfo,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (_currentUserData!['foto_url'] != null)
+                      CircleAvatar(
+                        backgroundImage: NetworkImage(
+                          _currentUserData!['foto_url'],
+                        ),
+                        radius: 30,
+                      ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'ID utente:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    SelectableText(
+                      _currentUserId ?? 'Nessun ID',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Nome: ${_currentUserData!['nome'] ?? 'Nessun nome'}',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'Email: ${_currentUserData!['email'] ?? 'Nessuna email'}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'Provider: ${_currentUserData!['provider'] ?? 'N/D'}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () async {
+                        final authService = AuthService();
+                        await authService.signOut();
+                        if (context.mounted) {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const AuthWrapper(),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
+                      child: const Text(
+                        'Esci',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1148,10 +1339,16 @@ Future<void> _runStartupCleanup() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // Abilita logging dettagliato Firestore
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
+
   AuthService().debugAuthConfiguration();
   await NotificationService().initialize();
 
-  // AGGIUNTO: Inizializzazione Workmanager
   await Workmanager().initialize(
     callbackDispatcher,
     isInDebugMode: false,
@@ -1168,7 +1365,6 @@ void main() async {
     prefs.setInt('lastRunTime', DateTime.now().millisecondsSinceEpoch);
   }
 
-  // AGGIUNTO: Registrazione task periodico con Workmanager
   await Workmanager().registerPeriodicTask(
     "background-task",
     "backgroundNotificationHandler",
