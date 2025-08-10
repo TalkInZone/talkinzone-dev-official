@@ -2,25 +2,23 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:myapp/category_utils.dart';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 🎙️ CLASSE PRINCIPALE - MODELLO MESSAGGIO VOCALE
-// ══════════════════════════════════════════════════════════════════════════
-/// Rappresenta un messaggio vocale con metadati geografici e statistiche d'uso
+/// Modello messaggio vocale
 class VoiceMessage {
-  // 🔐 PROPRIETA' FONDAMENTALI
-  final String id; // ID univoco documento Firestore
-  final DateTime timestamp; // Momento della registrazione
-  final double latitude; // Coordinata geografica
+  // Base
+  final String id;
+  final DateTime timestamp;
+  final double latitude;
   final double longitude;
-  final Duration duration; // Durata registrazione
-  final MessageCategory category; // Categoria tematica
-  final String storjObjectKey; // Chiave oggetto in Storj
-  final String senderId; // ID utente mittente
+  final Duration duration;
+  final MessageCategory category;
+  final String storjObjectKey;
+  final String senderId;
 
-  // 🔄 PROPRIETA' MUTABILI
-  String? localPath; // Percorso locale file (se scaricato)
-  int views; // Contatore visualizzazioni
-  List<String> viewedBy; // ID utenti che hanno visualizzato
+  // Aggiunte
+  final String name; // <<--- Nome mittente salvato nel documento
+  String? localPath;
+  int views;
+  List<String> viewedBy;
 
   VoiceMessage({
     required this.id,
@@ -31,62 +29,62 @@ class VoiceMessage {
     required this.category,
     required this.storjObjectKey,
     required this.senderId,
+    required this.name,
     this.localPath,
     required this.views,
     required this.viewedBy,
   });
 
-  // ██████████████████████████████████████████████████████████████████████
-  // 🏭 FACTORY: COSTRUZIONE DA FIRESTORE
-  // ██████████████████████████████████████████████████████████████████████
+  /// Costruzione robusta da Firestore
   factory VoiceMessage.fromFirestore(DocumentSnapshot doc) {
-    // 🧩 Estrazione dati documento
-    // ↪️ Funzione: Convertire snapshot Firestore in oggetto Dart
-    // ⚡ Input: DocumentSnapshot con dati voce
-    // 📤 Output: Istanza VoiceMessage
-    // 🔄 Logica: Mappatura campi con conversione tipi
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    final data = (doc.data() as Map<String, dynamic>? ?? {});
+
+    // timestamp può essere null finché serverTimestamp() non è risolto
+    final Timestamp? ts = data['timestamp'] as Timestamp?;
+    final DateTime tsDt = ts?.toDate() ?? DateTime.now();
+
+    // Cast numerici sicuri
+    final double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+    final double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+    final int durSec = (data['duration'] as num?)?.toInt() ?? 0;
+
+    // Categoria sicura
+    final String catName = (data['category'] as String?) ?? 'free';
+    final MessageCategory cat = MessageCategory.values.firstWhere(
+      (e) => e.name == catName,
+      orElse: () => MessageCategory.free,
+    );
+
+    // Campi basic
+    final String key = (data['storjObjectKey'] as String?) ?? '';
+    final String sid = (data['senderId'] as String?) ?? 'unknown';
+
+    // Statistiche
+    final int views = (data['views'] as num?)?.toInt() ?? 0;
+    final List<String> viewedBy =
+        List<String>.from((data['viewedBy'] as List?) ?? const []);
+
+    // Nome mittente salvato sul messaggio (fallback “Anonimo”)
+    final String name = ((data['name'] as String?)?.trim().isNotEmpty ?? false)
+        ? (data['name'] as String).trim()
+        : 'Anonimo';
 
     return VoiceMessage(
-      id: doc.id, // 🆔 ID documento come identificatore primario
-      // 🕒 Conversione timestamp
-      // 🔄 Necessario poiché Firestore usa Timestamp
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
-
-      // 📍 Coordinate geografiche
-      latitude: data['latitude'],
-      longitude: data['longitude'],
-
-      // ⏱️ Conversione durata
-      // 🔄 Firestore salva secondi come intero
-      duration: Duration(seconds: data['duration']),
-
-      // 🏷️ Ricerca categoria enumerata
-      // ⚠️ Fallback a 'free' se mancante
-      category: MessageCategory.values.firstWhere(
-        (e) => e.name == data['category'],
-        orElse: () => MessageCategory.free,
-      ),
-
-      // 🔑 Chiave oggetto storage decentralizzato
-      storjObjectKey: data['storjObjectKey'],
-
-      // 👤 Gestione mittente con fallback
-      senderId: data['senderId'] ?? 'unknown',
-
-      // 👀 Contatore visualizzazioni (default 0)
-      views: data['views'] ?? 0,
-
-      // 👥 Lista utenti che hanno visualizzato
-      // 🔄 Conversione esplicita per tipo List<String>
-      viewedBy: List<String>.from(data['viewedBy'] ?? []),
+      id: doc.id,
+      timestamp: tsDt,
+      latitude: lat,
+      longitude: lon,
+      duration: Duration(seconds: durSec),
+      category: cat,
+      storjObjectKey: key,
+      senderId: sid,
+      name: name,
+      views: views,
+      viewedBy: viewedBy,
     );
   }
 
-  // ██████████████████████████████████████████████████████████████████████
-  // ✂️ METODO COPY-WITH
-  // ██████████████████████████████████████████████████████████████████████
-  /// Genera copia dell'oggetto con campi aggiornati (pattern builder)
+  /// copyWith
   VoiceMessage copyWith({
     String? id,
     DateTime? timestamp,
@@ -96,15 +94,11 @@ class VoiceMessage {
     MessageCategory? category,
     String? storjObjectKey,
     String? senderId,
+    String? name,
     String? localPath,
     int? views,
     List<String>? viewedBy,
   }) {
-    // 🧩 Costruzione copia selettiva
-    // ↪️ Funzione: Creazione istanza modificata
-    // ⚡ Input: Parametri opzionali per override
-    // 📤 Output: Nuova istanza con valori sovrascritti
-    // 🔄 Logica: Mantiene valori originali dove non specificato
     return VoiceMessage(
       id: id ?? this.id,
       timestamp: timestamp ?? this.timestamp,
@@ -114,11 +108,8 @@ class VoiceMessage {
       category: category ?? this.category,
       storjObjectKey: storjObjectKey ?? this.storjObjectKey,
       senderId: senderId ?? this.senderId,
-
-      // 💾 Percorso file locale (nullable)
+      name: name ?? this.name,
       localPath: localPath ?? this.localPath,
-
-      // 📊 Statistiche visualizzazioni
       views: views ?? this.views,
       viewedBy: viewedBy ?? this.viewedBy,
     );

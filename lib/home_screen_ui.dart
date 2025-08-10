@@ -4,14 +4,10 @@ import 'package:myapp/category_utils.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:clipboard/clipboard.dart';
-import 'voice_message.dart'; // Import the shared VoiceMessage class
+import 'voice_message.dart';
 
-// ════════════════════════════════════════
-// ████ CLASSE: HomeScreenUI (StatefulWidget)
-// ════════════════════════════════════════
 class HomeScreenUI extends StatefulWidget {
-  // 🧩 PROPRIETÀ
-  // ↪️ Configurazione UI e stato applicazione
+  // Stato/props
   final bool showWelcomeMessage;
   final bool isInitialized;
   final bool showRadiusSelector;
@@ -19,7 +15,6 @@ class HomeScreenUI extends StatefulWidget {
   final Set<MessageCategory> activeFilters;
   final bool showCategorySelector;
   final MessageCategory selectedCategory;
-  final bool showOnlyMyMessages;
   final List<VoiceMessage> filteredMessages;
   final String? currentUserId;
   final Position? currentPosition;
@@ -31,21 +26,23 @@ class HomeScreenUI extends StatefulWidget {
   final String? playingMessageId;
   final List<double> radiusOptions;
 
-  // 🧩 CALLBACKS
-  // ↪️ Gestione eventi UI
+  // Callback
   final Function(VoiceMessage) onPlayMessage;
   final VoidCallback onToggleRadiusSelector;
   final Function(MessageCategory) onFilterToggled;
   final VoidCallback onToggleFilterSelector;
   final Function(MessageCategory) onCategorySelected;
   final VoidCallback onToggleCategorySelector;
-  final VoidCallback onToggleOnlyMyMessages;
   final VoidCallback onSettingsPressed;
+  final VoidCallback onProfilePressed; // << nuovo: profilo nella barra blu
   final VoidCallback onPressStart;
   final VoidCallback onPressEnd;
   final VoidCallback onStopRecording;
   final VoidCallback onStartRecording;
   final VoidCallback onWelcomeDismissed;
+
+  // cambia raggio
+  final Function(double) onRadiusChanged;
 
   const HomeScreenUI({
     super.key,
@@ -56,7 +53,6 @@ class HomeScreenUI extends StatefulWidget {
     required this.activeFilters,
     required this.showCategorySelector,
     required this.selectedCategory,
-    required this.showOnlyMyMessages,
     required this.filteredMessages,
     required this.currentUserId,
     required this.currentPosition,
@@ -73,38 +69,26 @@ class HomeScreenUI extends StatefulWidget {
     required this.onToggleFilterSelector,
     required this.onCategorySelected,
     required this.onToggleCategorySelector,
-    required this.onToggleOnlyMyMessages,
     required this.onSettingsPressed,
+    required this.onProfilePressed,
     required this.onPressStart,
     required this.onPressEnd,
     required this.onStopRecording,
     required this.onStartRecording,
     required this.onWelcomeDismissed,
+    required this.onRadiusChanged,
   });
 
   @override
   State<HomeScreenUI> createState() => _HomeScreenUIState();
 }
 
-// ════════════════════════════════════════
-// ████ STATO: _HomeScreenUIState
-// ════════════════════════════════════════
 class _HomeScreenUIState extends State<HomeScreenUI> {
-  // 🌿🌿🌿🌿🌿 METODI DI FORMATTAZIONE 🌿🌿🌿🌿🌿
-
-  // 🧩 Formattazione durata
-  // ↪️ Converti Duration in stringa MM:SS
-  // ⚡ Input: Durata messaggio
-  // 📤 Output: Stringa formattata
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     return '${twoDigits(duration.inMinutes)}:${twoDigits(duration.inSeconds % 60)}';
   }
 
-  // 🧩 Tempo trascorso
-  // ↪️ Calcola tempo relativo per UI
-  // ⚡ Input: Timestamp messaggio
-  // 📤 Output: Stringa descrittiva (es. "5m fa")
   String _getTimeAgo(DateTime timestamp) {
     final now = DateTime.now();
     final difference = now.difference(timestamp);
@@ -113,10 +97,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return '${difference.inHours}h fa';
   }
 
-  // 🧩 Tempo rimanente
-  // ↪️ Calcola tempo rimanente prima di scadenza messaggio (5 min)
-  // ⚡ Input: Timestamp messaggio
-  // 📤 Output: Stringa MM:SS
   String _getTimeRemaining(DateTime timestamp) {
     final now = DateTime.now();
     final elapsed = now.difference(timestamp);
@@ -127,18 +107,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
-  // 🧩 Nome visualizzato mittente
-  // ↪️ Determina se il messaggio è dell'utente corrente
-  // ⚡ Input: Oggetto VoiceMessage
-  // 📤 Output: "Tu" o "Anonimo"
   String _getSenderDisplayName(VoiceMessage message) {
-    return message.senderId == widget.currentUserId ? 'Tu' : 'Anonimo';
+    if (message.senderId == widget.currentUserId) return 'Tu';
+    return message.name.isNotEmpty ? message.name : 'Anonimo';
   }
 
-  // 🧩 Formattazione distanza generica
-  // ↪️ Classifica distanza in categorie intuitive
-  // ⚡ Input: Distanza in metri
-  // 📤 Output: Descrizione testuale (es. "Molto vicino")
   String _formatDistanceGenerically(double meters) {
     if (meters < 1000) return 'Molto vicino';
     if (meters < 3000) return 'Vicino';
@@ -146,9 +119,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return 'Lontano';
   }
 
-  // ════════════════════════════════════════
-  // ████ COMPONENTE: Dialogo Benvenuto
-  // ════════════════════════════════════════
   Widget _buildWelcomeDialog() {
     return AlertDialog(
       backgroundColor: Colors.white,
@@ -168,36 +138,24 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
           children: [
             const Icon(Icons.info_outline, size: 48, color: Colors.blue),
             const SizedBox(height: 20),
-
-            // 🧩 Messaggio descrittivo 1
-            // ↪️ Informa sulla versione pre-alpha
             const Text(
               "Questa è una versione pre-alpha, disponibile per un mese.",
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.black87),
             ),
             const SizedBox(height: 12),
-
-            // 🧩 Messaggio descrittivo 2
-            // ↪️ Spiega lo scopo del testing
             const Text(
               "L'app è ancora in costruzione, ma ogni utilizzo ci aiuta a migliorarla.",
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.black87),
             ),
             const SizedBox(height: 12),
-
-            // 🧩 Messaggio descrittivo 3
-            // ↪️ Descrive gli obiettivi dell'app
             const Text(
               "Il nostro obiettivo? Offrire uno strumento versatile per social, promozione ed eventi.",
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.black87),
             ),
             const SizedBox(height: 12),
-
-            // 🧩 Messaggio descrittivo 4
-            // ↪️ Invito al feedback
             const Text(
               "Provala e, se qualcosa ti viene in mente, il tuo feedback sarà più che benvenuto!",
               textAlign: TextAlign.center,
@@ -208,10 +166,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // 🧩 Link informative privacy
-            // ↪️ Collegamento esterno con fallback
-            // ⚠️ Side effect: Apertura browser/copia appunti
             InkWell(
               onTap: () async {
                 const url = 'https://talkinzone-normative.vercel.app/';
@@ -229,17 +183,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                           action: SnackBarAction(
                             label: 'COPIA LINK',
                             onPressed: () {
-                              FlutterClipboard.copy(url).then((_) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Link copiato negli appunti',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              });
+                              FlutterClipboard.copy(url);
                             },
                           ),
                         ),
@@ -248,13 +192,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                   }
                 } catch (e) {
                   debugPrint('Errore apertura URL: $e');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Si è verificato un errore'),
-                      ),
-                    );
-                  }
                 }
               },
               child: Text(
@@ -267,17 +204,12 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
               ),
             ),
             const SizedBox(height: 20),
-
-            // 🧩 Pulsante inizio utilizzo
-            // ↪️ Chiude il dialogo tramite callback
             ElevatedButton(
               onPressed: widget.onWelcomeDismissed,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 45,
-                  vertical: 12,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 45, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(30),
                 ),
@@ -297,9 +229,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     );
   }
 
-  // ════════════════════════════════════════
-  // ████ COMPONENTE: Selettore Raggio
-  // ════════════════════════════════════════
   Widget _buildRadiusSelector() {
     return AnimatedSize(
       duration: const Duration(milliseconds: 300),
@@ -325,8 +254,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
           ),
           child: Stack(
             children: [
-              // 🧩 Pulsante chiusura
-              // ↪️ Gestisce toggle visibilità selettore
               Positioned(
                 top: 8,
                 right: 8,
@@ -351,9 +278,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                   ),
                   const SizedBox(height: 16),
-
-                  // 🧩 Opzioni raggio
-                  // ↪️ Mappa valori a chip selezionabili
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -363,15 +287,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         label: Text(
                           radius < 1000
                               ? '${radius.toInt()} m'
-                              : '${(radius / 1000).toInt()} km',
+                              : '${(radius / 1000).toStringAsFixed(0)} km',
                         ),
                         selected: isSelected,
                         onSelected: (selected) {
-                          if (selected) {
-                            widget.onCategorySelected(
-                              widget.selectedCategory,
-                            );
-                          }
+                          if (selected) widget.onRadiusChanged(radius);
                         },
                         selectedColor: Colors.blue[100],
                         backgroundColor: Colors.grey[200],
@@ -390,9 +310,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     }).toList(),
                   ),
                   const SizedBox(height: 16),
-
-                  // 🧩 Raggio selezionato
-                  // ↪️ Mostra descrizione raggio corrente
                   Text(
                     'Messaggi entro ${widget.selectedRadius < 1000 ? '${widget.selectedRadius.toInt()} metri' : '${(widget.selectedRadius / 1000).toInt()} km'}',
                     style: TextStyle(
@@ -410,13 +327,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     );
   }
 
-  // ════════════════════════════════════════
-  // ████ BUILD PRINCIPALE
-  // ════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    // 🧩 Schermata benvenuto
-    // ↪️ Mostra dialogo iniziale se richiesto
     if (widget.showWelcomeMessage) {
       return Scaffold(
         backgroundColor: Colors.grey[100],
@@ -424,8 +336,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       );
     }
 
-    // 🧩 Schermata caricamento
-    // ↪️ Mostra indicator durante inizializzazione
     if (!widget.isInitialized) {
       return const Scaffold(
         body: Center(
@@ -441,23 +351,16 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       );
     }
 
-    // 🧩 UI principale
-    // ↪️ Costruisce l'interfaccia completa
     return Scaffold(
       appBar: AppBar(
         title: const Text('TalkInZone'),
         backgroundColor: Colors.blue[700],
         foregroundColor: Colors.white,
         actions: [
-          // 🧩 Pulsante raggio
-          // ↪️ Toggle selettore area geografica
           IconButton(
             icon: const Icon(Icons.place),
             onPressed: widget.onToggleRadiusSelector,
           ),
-
-          // 🧩 Pulsante filtri
-          // ↪️ Toggle selettore categorie con indicatore
           IconButton(
             icon: Stack(
               children: [
@@ -479,19 +382,10 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
             ),
             onPressed: widget.onToggleFilterSelector,
           ),
-
-          // 🧩 Pulsante solo miei messaggi
-          // ↪️ Toggle filtro messaggi personali
           IconButton(
-            icon: Icon(
-              widget.showOnlyMyMessages ? Icons.person : Icons.person_outline,
-              color: widget.showOnlyMyMessages ? Colors.amber : Colors.white,
-            ),
-            onPressed: widget.onToggleOnlyMyMessages,
+            icon: const Icon(Icons.person), // << profilo nella barra blu
+            onPressed: widget.onProfilePressed,
           ),
-
-          // 🧩 Pulsante impostazioni
-          // ↪️ Apre schermata impostazioni
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: widget.onSettingsPressed,
@@ -500,27 +394,19 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       ),
       body: Column(
         children: [
-          // 🧩 Selettore raggio (condizionale)
           _buildRadiusSelector(),
-
-          // 🧩 Selettore filtri (condizionale)
           if (widget.showFilterSelector)
             FilterSelector(
               activeFilters: widget.activeFilters,
               onFilterToggled: widget.onFilterToggled,
               onClose: widget.onToggleFilterSelector,
             ),
-
-          // 🧩 Selettore categoria (condizionale)
           if (widget.showCategorySelector)
             CategorySelector(
               selectedCategory: widget.selectedCategory,
               onCategorySelected: widget.onCategorySelected,
               onClose: widget.onToggleCategorySelector,
             ),
-
-          // 🧩 Lista messaggi
-          // ↪️ Area scrollabile con messaggi vocali
           Expanded(
             child: Container(
               padding: const EdgeInsets.all(16),
@@ -529,20 +415,13 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.mic_none,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
+                          Icon(Icons.mic_none,
+                              size: 64, color: Colors.grey[400]),
                           const SizedBox(height: 16),
                           Text(
-                            widget.filteredMessages.isEmpty
-                                ? 'Nessun messaggio vocale nelle vicinanze'
-                                : 'Nessun messaggio per i filtri selezionati',
+                            'Nessun messaggio vocale nelle vicinanze',
                             style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[600],
-                            ),
+                                fontSize: 16, color: Colors.grey[600]),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
@@ -551,9 +430,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                 ? 'Raggio di visualizzazione: ${widget.selectedRadius.toInt()} metri'
                                 : 'Raggio di visualizzazione: ${(widget.selectedRadius / 1000).toStringAsFixed(1)} km',
                             style: const TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey,
-                            ),
+                                fontSize: 14, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -567,8 +444,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         final isCurrentUser =
                             message.senderId == widget.currentUserId;
 
-                        // 🧩 Calcolo distanza
-                        // ↪️ Determina prossimità messaggio
                         double? distance;
                         if (widget.currentPosition != null) {
                           distance = Geolocator.distanceBetween(
@@ -601,12 +476,10 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                   borderRadius: BorderRadius.only(
                                     topLeft: const Radius.circular(18),
                                     topRight: const Radius.circular(18),
-                                    bottomLeft: Radius.circular(
-                                      isCurrentUser ? 18 : 4,
-                                    ),
-                                    bottomRight: Radius.circular(
-                                      isCurrentUser ? 4 : 18,
-                                    ),
+                                    bottomLeft:
+                                        Radius.circular(isCurrentUser ? 18 : 4),
+                                    bottomRight:
+                                        Radius.circular(isCurrentUser ? 4 : 18),
                                   ),
                                   border: Border.all(
                                     color: message.category.color,
@@ -623,8 +496,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // 🧩 Intestazione messaggio
-                                    // ↪️ Mostra categoria e distanza
+                                    // Intestazione (categoria + distanza)
                                     Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
@@ -650,16 +522,13 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                         if (distance != null)
                                           Row(
                                             children: [
-                                              Icon(
-                                                Icons.place,
-                                                size: 12,
-                                                color: Colors.grey[600],
-                                              ),
+                                              Icon(Icons.place,
+                                                  size: 12,
+                                                  color: Colors.grey[600]),
                                               const SizedBox(width: 4),
                                               Text(
                                                 _formatDistanceGenerically(
-                                                  distance,
-                                                ),
+                                                    distance),
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   color: Colors.grey[600],
@@ -670,13 +539,9 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-
-                                    // 🧩 Corpo messaggio
-                                    // ↪️ Controllo riproduzione e metadati
+                                    // Corpo (play + metadati)
                                     Row(
                                       children: [
-                                        // 🧩 Pulsante play/stop
-                                        // ↪️ Gestisce riproduzione audio
                                         Container(
                                           width: 40,
                                           height: 40,
@@ -704,7 +569,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                                     MainAxisAlignment
                                                         .spaceBetween,
                                                 children: [
-                                                  // 🧩 Mittente
+                                                  // Mittente: "Tu" o nome
                                                   Row(
                                                     children: [
                                                       Icon(
@@ -715,13 +580,10 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                                                 .category.color
                                                             : Colors.grey[600],
                                                       ),
-                                                      const SizedBox(
-                                                        width: 4,
-                                                      ),
+                                                      const SizedBox(width: 4),
                                                       Text(
                                                         _getSenderDisplayName(
-                                                          message,
-                                                        ),
+                                                            message),
                                                         style: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight:
@@ -735,22 +597,17 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                                       ),
                                                     ],
                                                   ),
-                                                  // 🧩 Durata audio
+                                                  // Durata
                                                   Row(
                                                     children: [
-                                                      Icon(
-                                                        Icons.graphic_eq,
-                                                        size: 16,
-                                                        color: message
-                                                            .category.color,
-                                                      ),
-                                                      const SizedBox(
-                                                        width: 4,
-                                                      ),
+                                                      Icon(Icons.graphic_eq,
+                                                          size: 16,
+                                                          color: message
+                                                              .category.color),
+                                                      const SizedBox(width: 4),
                                                       Text(
                                                         _formatDuration(
-                                                          message.duration,
-                                                        ),
+                                                            message.duration),
                                                         style: TextStyle(
                                                           fontSize: 14,
                                                           fontWeight:
@@ -769,33 +626,27 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                                     MainAxisAlignment
                                                         .spaceBetween,
                                                 children: [
-                                                  // 🧩 Tempo trascorso
+                                                  // Tempo trascorso
                                                   Text(
                                                     _getTimeAgo(
-                                                      message.timestamp,
-                                                    ),
+                                                        message.timestamp),
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                       color: message
                                                           .category.color,
                                                     ),
                                                   ),
-                                                  // 🧩 Tempo rimanente
+                                                  // Tempo rimanente
                                                   Row(
                                                     children: [
-                                                      Icon(
-                                                        Icons.timer,
-                                                        size: 12,
-                                                        color:
-                                                            Colors.orange[700],
-                                                      ),
-                                                      const SizedBox(
-                                                        width: 2,
-                                                      ),
+                                                      Icon(Icons.timer,
+                                                          size: 12,
+                                                          color: Colors
+                                                              .orange[700]),
+                                                      const SizedBox(width: 2),
                                                       Text(
                                                         _getTimeRemaining(
-                                                          message.timestamp,
-                                                        ),
+                                                            message.timestamp),
                                                         style: TextStyle(
                                                           fontSize: 11,
                                                           color: Colors
@@ -814,17 +665,12 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-
-                                    // 🧩 Visualizzazioni
-                                    // ↪️ Mostra conteggio visualizzazioni
+                                    // Visualizzazioni
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
-                                        Icon(
-                                          Icons.remove_red_eye,
-                                          size: 14,
-                                          color: Colors.grey[600],
-                                        ),
+                                        Icon(Icons.remove_red_eye,
+                                            size: 14, color: Colors.grey[600]),
                                         const SizedBox(width: 4),
                                         Text(
                                           message.views > 0
@@ -850,9 +696,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     ),
             ),
           ),
-
-          // 🧩 Barra registrazione
-          // ↪️ Mostra stato registrazione attiva
+          // Barra registrazione
           if (widget.isRecording)
             Container(
               padding: const EdgeInsets.all(16),
@@ -870,11 +714,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        widget.selectedCategory.icon,
-                        color: widget.selectedCategory.color,
-                        size: 20,
-                      ),
+                      Icon(widget.selectedCategory.icon,
+                          color: widget.selectedCategory.color, size: 20),
                       const SizedBox(width: 8),
                       Text(
                         'Registrando ${widget.selectedCategory.label}...',
@@ -904,9 +745,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // 🧩 Animazione registrazione
-                  // ↪️ Barre animate che simulano input audio
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(5, (index) {
@@ -927,21 +765,13 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                 ],
               ),
             ),
-
-          // 🧩 Area controllo registrazione
-          // ↪️ Contiene pulsanti per registrazione vocale
+          // Controlli registrazione
           Container(
-            padding: const EdgeInsets.only(
-              top: 12,
-              bottom: 70,
-              left: 24,
-              right: 24,
-            ),
+            padding:
+                const EdgeInsets.only(top: 12, bottom: 70, left: 24, right: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 🧩 Selettore categoria (non in registrazione)
-                // ↪️ Permette cambiamento categoria prima di registrare
                 if (!widget.isRecording)
                   GestureDetector(
                     onTap: widget.onToggleCategorySelector,
@@ -964,9 +794,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     ),
                   ),
                 if (!widget.isRecording) const SizedBox(width: 16),
-
-                // 🧩 Pulsante registrazione principale
-                // ↪️ Gestisce inizio/stop registrazione con diversi input
                 Listener(
                   onPointerDown: (_) => widget.onPressStart(),
                   onPointerUp: (_) => widget.onPressEnd(),
@@ -1012,9 +839,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   }
 }
 
-// ════════════════════════════════════════
-// ████ COMPONENTE: FilterSelector
-// ════════════════════════════════════════
+// ------------------ FilterSelector ------------------
 class FilterSelector extends StatelessWidget {
   final Set<MessageCategory> activeFilters;
   final Function(MessageCategory) onFilterToggled;
@@ -1058,9 +883,6 @@ class FilterSelector extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
-          // 🧩 Chip filtri
-          // ↪️ Genera chip per ogni categoria disponibile
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1085,7 +907,7 @@ class FilterSelector extends StatelessWidget {
                   ],
                 ),
                 selected: isActive,
-                onSelected: (selected) => onFilterToggled(category),
+                onSelected: (_) => onFilterToggled(category),
                 selectedColor: category.color,
                 backgroundColor: Colors.grey[200],
                 checkmarkColor: Colors.white,
@@ -1101,9 +923,7 @@ class FilterSelector extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════
-// ████ COMPONENTE: CategorySelector
-// ════════════════════════════════════════
+// ------------------ CategorySelector ------------------
 class CategorySelector extends StatelessWidget {
   final MessageCategory selectedCategory;
   final Function(MessageCategory) onCategorySelected;
@@ -1147,9 +967,6 @@ class CategorySelector extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
-          // 🧩 Chip categorie
-          // ↪️ Permette selezione categoria per registrazione
           Wrap(
             spacing: 8,
             runSpacing: 8,
