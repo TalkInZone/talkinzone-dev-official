@@ -1004,20 +1004,79 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  Future<void> _playMessage(VoiceMessage message) async {
+  // =========================
+  //  SEQUENTIAL PLAY HELPERS
+  // =========================
+
+  // Coda riproducibile: filtra come in UI e ordina dal più vecchio al più nuovo.
+  List<VoiceMessage> _getPlayableMessages() {
+    final now = DateTime.now();
+    final list = _messages.where((m) {
+      final expired = now.difference(m.timestamp).inMinutes >= 5;
+      if (expired) return false;
+      if (!_isMessageInRange(m)) return false;
+      if (!_activeFilters.contains(m.category)) return false;
+      return true;
+    }).toList();
+
+    list.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return list;
+  }
+
+  // Quando un vocale finisce, avvia il prossimo nella coda corrente.
+  Future<void> _playNextAfter(String justPlayedId) async {
+    if (_isDisposed) return;
+    final playable = _getPlayableMessages();
+    final idx = playable.indexWhere((m) => m.id == justPlayedId);
+
+    if (idx == -1 || idx == playable.length - 1) {
+      if (!_isDisposed) {
+        setState(() {
+          _isPlaying = false;
+          _playingMessageId = null;
+        });
+      }
+      return;
+    }
+
+    final next = playable[idx + 1];
+    await _playMessageInternal(next, fromAuto: true);
+  }
+
+  // Mantengo la firma usata dalla UI
+  Future<void> _playMessage(VoiceMessage message) =>
+      _playMessageInternal(message, fromAuto: false);
+
+  // Implementazione con supporto a auto-play
+  Future<void> _playMessageInternal(VoiceMessage message,
+      {bool fromAuto = false}) async {
     if (_player == null) return;
 
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
     final String? myUid = (currentUid != null && currentUid.isNotEmpty)
         ? currentUid
         : _currentUserId;
-
     if (myUid == null || myUid.isEmpty) return;
 
     final bool alreadyViewed = message.viewedBy.contains(myUid);
 
+    // 🔁 Toggle stop solo se è un tap dell'utente (non da coda)
+    if (!fromAuto && _isPlaying && _playingMessageId == message.id) {
+      try {
+        await _player!.stopPlayer();
+      } catch (_) {}
+      if (!_isDisposed) {
+        setState(() {
+          _isPlaying = false;
+          _playingMessageId = null;
+        });
+      }
+      return;
+    }
+
     try {
-      if (_isPlaying) {
+      // Se stava suonando altro e NON è auto-avvio, fermalo
+      if (!fromAuto && _isPlaying) {
         await _player!.stopPlayer();
         if (!_isDisposed) {
           setState(() {
@@ -1042,12 +1101,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       await _player!.startPlayer(
         fromURI: audioPath,
         whenFinished: () {
-          if (!_isDisposed) {
-            setState(() {
-              _isPlaying = false;
-              _playingMessageId = null;
-            });
-          }
+          if (_isDisposed) return;
+          // Microtask per evitare conflitti col callback
+          Future.microtask(() => _playNextAfter(message.id));
         },
       );
 
@@ -1166,7 +1222,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             isWaitingForRelease: _isWaitingForRelease,
             playingMessageId: _playingMessageId,
             radiusOptions: _radiusOptions,
-            onPlayMessage: _playMessage,
+            onPlayMessage: _playMessage, // wrapper compatibile con la UI
             onToggleRadiusSelector: () => setState(() {
               _showRadiusSelector = !_showRadiusSelector;
               if (_showRadiusSelector) {
