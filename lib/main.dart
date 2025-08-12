@@ -1,3 +1,9 @@
+// main.dart — completo
+// 🔧 Patch minima:
+// - In backgroundNotificationHandler(): se type == 'text' non cancellare su Storj.
+// - In _cleanupOldMessages(): cancella su Storj solo se message.isVoice.
+// - In _runStartupCleanup(): se type == 'text' non cancellare su Storj.
+
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -20,10 +26,7 @@ import 'update_required_screen.dart';
 import 'category_utils.dart';
 import 'home_screen_ui.dart';
 import 'voice_message.dart';
-
-// === [AGGIUNTA] ===
-// Import del modulo profilo utente (schema/chiavi/utility)
-import 'services/user_profile.dart';
+import 'services/user_profile.dart'; // profilo
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -35,15 +38,11 @@ void callbackDispatcher() {
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: ['email', 'profile'],
-  );
+  final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
   Future<User?> signInWithGoogle() async {
     try {
       debugPrint("🔄 Inizio processo autenticazione Google...");
-
       try {
         await _googleSignIn.signOut();
         await _auth.signOut();
@@ -124,14 +123,12 @@ class AuthService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_id', user.uid);
 
-      // Upsert profilo centralizzato
       await UserProfile.upsertOnAuth(user,
           provider: 'google', pruneUnknownKeys: true);
 
       debugPrint(
           "✅ Dati utente (upsert) salvati/aggiornati per UID: ${user.uid}");
 
-      // Verifica immediata
       final userDoc =
           FirebaseFirestore.instance.collection('utenti').doc(user.uid);
       final docSnapshot = await userDoc.get();
@@ -143,7 +140,6 @@ class AuthService {
     } catch (e, stack) {
       debugPrint('💥 ERRORE CRITICO salvataggio dati utente: $e');
       debugPrint('🔥 Stack trace: $stack');
-
       if (e is FirebaseException) {
         debugPrint("🔥 FIREBASE ERROR CODE: ${e.code}");
         debugPrint("🔥 FIREBASE MESSAGE: ${e.message}");
@@ -192,12 +188,13 @@ class NotificationService {
   Future<void> showNewMessageNotification({
     required String category,
     required String messageId,
+    required bool isText,
   }) async {
     const AndroidNotificationDetails androidNotificationDetails =
         AndroidNotificationDetails(
-      'new_voice_message',
-      'Nuovi messaggi vocali',
-      channelDescription: 'Notifiche per nuovi messaggi vocali',
+      'new_message',
+      'Nuovi messaggi',
+      channelDescription: 'Notifiche per nuovi messaggi',
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
@@ -211,7 +208,7 @@ class NotificationService {
     await _notificationsPlugin.show(
       messageId.hashCode,
       'Nuovo messaggio ${category.toLowerCase()}',
-      'Clicca per ascoltare',
+      isText ? 'Clicca per leggere' : 'Clicca per ascoltare',
       notificationDetails,
       payload: messageId,
     );
@@ -227,7 +224,6 @@ Future<void> backgroundNotificationHandler() async {
 
   try {
     final now = DateTime.now();
-    // CORREZIONE: usa 5 minuti invece di 6
     final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
 
     final expiredMessages = await firestore
@@ -241,6 +237,7 @@ Future<void> backgroundNotificationHandler() async {
     for (final doc in expiredMessages.docs) {
       try {
         final data = doc.data();
+        final String type = (data['type'] as String?) ?? 'voice'; // ✅ NEW
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 
@@ -257,7 +254,8 @@ Future<void> backgroundNotificationHandler() async {
         debugPrint('🗑️ [BACKGROUND] Cancellazione messaggio scaduto: ${doc.id}'
             ' (Inviato: ${timestamp.toDate()}, Scaduto: $expirationTime)');
 
-        if (objectKey.isNotEmpty) {
+        // ✅ Skip cancellazione Storj per messaggi testuali
+        if (type != 'text' && objectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(objectKey);
             debugPrint('✅ [BACKGROUND] File audio cancellato su Storj');
@@ -333,9 +331,13 @@ Future<void> backgroundNotificationHandler() async {
 
         if (distance <= selectedRadius) {
           final category = data['category'] as String? ?? 'free';
+          final String type = (data['type'] as String?) ?? 'voice';
+          final bool isText = type == 'text';
+
           notificationService.showNewMessageNotification(
             category: category,
             messageId: doc.id,
+            isText: isText,
           );
         }
       }
@@ -504,15 +506,25 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   bool _isDisposed = false;
 
+  // NEW: testo
+  final TextEditingController _textController = TextEditingController();
+  bool _isSendingText = false;
+
+  // NEW: debounce locale per “testo visto”
+  final Set<String> _textSeenOnce = {};
+
   @override
   void initState() {
     super.initState();
     WidgetsFlutterBinding.ensureInitialized();
     WidgetsBinding.instance.addObserver(this);
+
+    _textController.addListener(() {
+      if (mounted) setState(() {});
+    });
+
     _loadSettings();
     _initializeApp();
-
-    // Aggiorna ultimo accesso all'avvio
     _touchLastAccessIfLoggedIn();
   }
 
@@ -520,14 +532,29 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   void dispose() {
     _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
-    _cleanupResources();
+
+    _messagesSubscription?.cancel();
+    _recordingTimer?.cancel();
+    _cleanupTimer?.cancel();
+    _countdownTimer?.cancel();
+    _longPressTimer?.cancel();
+    _gpsUpdateTimer?.cancel();
+
+    _textController.dispose();
+
+    try {
+      _recorder?.closeRecorder();
+      _player?.closePlayer();
+    } catch (e) {
+      debugPrint('❌ Errore cleanup risorse: $e');
+    }
+
     super.dispose();
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Usa prima l'UID dell'auth, poi eventuale fallback dai prefs
     final uidAuth = FirebaseAuth.instance.currentUser?.uid;
     final uidPrefs = prefs.getString('user_id');
     final resolvedUid =
@@ -552,7 +579,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     try {
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('utenti')
-          .doc(_currentUserId)
+          .doc(_currentUserId!)
           .get();
 
       if (userDoc.exists) {
@@ -568,29 +595,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  void _cleanupResources() {
-    _messagesSubscription?.cancel();
-    _recordingTimer?.cancel();
-    _cleanupTimer?.cancel();
-    _countdownTimer?.cancel();
-    _longPressTimer?.cancel();
-    _gpsUpdateTimer?.cancel();
-
-    try {
-      _recorder?.closeRecorder();
-      _player?.closePlayer();
-    } catch (e) {
-      debugPrint('❌ Errore cleanup risorse: $e');
-    }
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       setState(() => _isAppInForeground = true);
       _getCurrentLocation();
       _startGpsTimer();
-
       _touchLastAccessIfLoggedIn();
     } else if (state == AppLifecycleState.paused) {
       setState(() => _isAppInForeground = false);
@@ -598,13 +608,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // Aggiorna il campo ultimo_accesso se l'utente è loggato.
   Future<void> _touchLastAccessIfLoggedIn() async {
     try {
       if (_currentUserId != null && _currentUserId!.isNotEmpty) {
         await FirebaseFirestore.instance
             .collection('utenti')
-            .doc(_currentUserId)
+            .doc(_currentUserId!)
             .set(UserProfile.touchLastAccess(), SetOptions(merge: true));
         debugPrint("🕒 ultimo_accesso aggiornato per UID: $_currentUserId");
       }
@@ -626,7 +635,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     await _getCurrentLocation();
     _startTimers();
 
-    // Listener Firestore – ora NON scartiamo la cache (fix visualizzati)
     _initializeFirestoreListener();
 
     setState(() => _isInitialized = true);
@@ -656,7 +664,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     );
   }
 
-  // Utility per ricavare il nome visuale dell’utente corrente
   Future<String> _resolveCurrentUserDisplayName() async {
     try {
       final cached = _currentUserData?['nome'];
@@ -667,7 +674,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       if (_currentUserId != null && _currentUserId!.isNotEmpty) {
         final snap = await FirebaseFirestore.instance
             .collection('utenti')
-            .doc(_currentUserId)
+            .doc(_currentUserId!)
             .get();
         final nome = snap.data()?['nome'];
         if (nome is String && nome.trim().isNotEmpty) {
@@ -688,7 +695,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // Se un documento messaggio arriva senza 'name', lo correggo una volta sola.
   Future<void> _ensureMessageHasName(DocumentSnapshot doc) async {
     try {
       final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -730,9 +736,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         if (isExpired) {
           removedMessages.add(newMessage.id);
         } else {
-          final existingIndex = _messages.indexWhere(
-            (m) => m.id == newMessage.id,
-          );
+          final existingIndex =
+              _messages.indexWhere((m) => m.id == newMessage.id);
           if (existingIndex != -1) {
             final updatedMessage = newMessage.copyWith(
               localPath: _messages[existingIndex].localPath,
@@ -841,19 +846,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
     for (final message in _messages) {
       final elapsedMinutes = now.difference(message.timestamp).inMinutes;
-
-      if (elapsedMinutes >= 5) {
-        messagesToRemove.add(message);
-      }
+      if (elapsedMinutes >= 5) messagesToRemove.add(message);
     }
 
     if (messagesToRemove.isEmpty) return;
 
     for (final message in messagesToRemove) {
       try {
-        final expirationTime = message.timestamp.add(
-          const Duration(minutes: 5),
-        );
+        final expirationTime =
+            message.timestamp.add(const Duration(minutes: 5));
         if (DateTime.now().isBefore(expirationTime)) {
           debugPrint('⏱️ Messaggio non ancora scaduto, salto');
           continue;
@@ -862,7 +863,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         debugPrint(
             '🗑️ [${DateTime.now()}] Cancellazione messaggio scaduto: ${message.id}');
 
-        if (message.storjObjectKey.isNotEmpty) {
+        // ✅ Cancella su Storj SOLO se è un vocale
+        if (message.isVoice && message.storjObjectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(message.storjObjectKey);
             debugPrint('✅ File audio cancellato su Storj');
@@ -953,14 +955,14 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           _currentPosition != null &&
           _recordingSeconds > 0) {
         try {
-          final objectKey = await storjService.uploadFile(
-            _currentRecordingPath!,
-          );
+          final objectKey =
+              await storjService.uploadFile(_currentRecordingPath!);
 
           final String senderName = await _resolveCurrentUserDisplayName();
           final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
 
           await _firestoreMessages.add({
+            'type': 'voice',
             'timestamp': FieldValue.serverTimestamp(),
             'latitude': _currentPosition!.latitude,
             'longitude': _currentPosition!.longitude,
@@ -971,22 +973,19 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             'views': 0,
             'viewedBy': <String>[],
             'name': senderName,
+            'text': null,
           });
         } catch (e) {
           debugPrint('❌ Errore salvataggio messaggio: $e');
           try {
             await File(_currentRecordingPath!).delete();
-          } catch (e) {
-            debugPrint('Ignorato errore cancellazione file: $e');
-          }
+          } catch (_) {}
         }
       } else {
         if (_currentRecordingPath != null) {
           try {
             await File(_currentRecordingPath!).delete();
-          } catch (e) {
-            debugPrint('Ignorato errore cancellazione file: $e');
-          }
+          } catch (_) {}
         }
       }
     } catch (e) {
@@ -1004,11 +1003,47 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // =========================
-  //  SEQUENTIAL PLAY HELPERS
-  // =========================
+  Future<void> _sendTextMessage() async {
+    final raw = _textController.text.trim();
+    if (raw.isEmpty) return;
 
-  // Coda riproducibile: filtra come in UI e ordina dal più vecchio al più nuovo.
+    if (raw.characters.length > 250) {
+      _textController.text = raw.characters.take(250).toString();
+    }
+
+    if (_currentPosition == null) {
+      await _getCurrentLocation();
+    }
+
+    try {
+      setState(() => _isSendingText = true);
+
+      final String senderName = await _resolveCurrentUserDisplayName();
+      final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+
+      await _firestoreMessages.add({
+        'type': 'text',
+        'timestamp': FieldValue.serverTimestamp(),
+        'latitude': _currentPosition?.latitude ?? 0.0,
+        'longitude': _currentPosition?.longitude ?? 0.0,
+        'duration': 0,
+        'category': _selectedCategory.name,
+        'storjObjectKey': '',
+        'senderId': currentUid ?? (_currentUserId ?? ''),
+        'views': 0,
+        'viewedBy': <String>[],
+        'name': senderName,
+        'text': _textController.text.trim(),
+      });
+
+      _textController.clear();
+    } catch (e) {
+      debugPrint('❌ Errore invio testo: $e');
+    } finally {
+      if (mounted) setState(() => _isSendingText = false);
+    }
+  }
+
   List<VoiceMessage> _getPlayableMessages() {
     final now = DateTime.now();
     final list = _messages.where((m) {
@@ -1023,7 +1058,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     return list;
   }
 
-  // Quando un vocale finisce, avvia il prossimo nella coda corrente.
   Future<void> _playNextAfter(String justPlayedId) async {
     if (_isDisposed) return;
     final playable = _getPlayableMessages();
@@ -1043,11 +1077,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     await _playMessageInternal(next, fromAuto: true);
   }
 
-  // Mantengo la firma usata dalla UI
   Future<void> _playMessage(VoiceMessage message) =>
       _playMessageInternal(message, fromAuto: false);
 
-  // Implementazione con supporto a auto-play
   Future<void> _playMessageInternal(VoiceMessage message,
       {bool fromAuto = false}) async {
     if (_player == null) return;
@@ -1058,9 +1090,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         : _currentUserId;
     if (myUid == null || myUid.isEmpty) return;
 
+    // ✅ Testo: niente azioni qui (il visto avviene su visibilità viewport)
+    if (message.isText) return;
+
     final bool alreadyViewed = message.viewedBy.contains(myUid);
 
-    // 🔁 Toggle stop solo se è un tap dell'utente (non da coda)
     if (!fromAuto && _isPlaying && _playingMessageId == message.id) {
       try {
         await _player!.stopPlayer();
@@ -1075,7 +1109,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
 
     try {
-      // Se stava suonando altro e NON è auto-avvio, fermalo
       if (!fromAuto && _isPlaying) {
         await _player!.stopPlayer();
         if (!_isDisposed) {
@@ -1102,7 +1135,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         fromURI: audioPath,
         whenFinished: () {
           if (_isDisposed) return;
-          // Microtask per evitare conflitti col callback
           Future.microtask(() => _playNextAfter(message.id));
         },
       );
@@ -1120,7 +1152,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             'views': FieldValue.increment(1),
             'viewedBy': FieldValue.arrayUnion([myUid]),
           });
-
           if (!_isDisposed) {
             setState(() {
               message.views++;
@@ -1178,7 +1209,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // Prima ricarica i dati utente dal DB, poi apre/chiude il pannellino profilo
   Future<void> _refreshAndToggleUserInfo() async {
     try {
       await _loadUserData();
@@ -1187,6 +1217,54 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       setState(() {
         _showUserInfo = !_showUserInfo;
       });
+    }
+  }
+
+  // NEW: marca "letto" per MESSAGGI TESTUALI quando la bolla è visibile (callback da UI)
+  Future<void> _markTextMessageViewed(VoiceMessage message) async {
+    if (!message.isText) return;
+
+    final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final String? myUid = (currentUid != null && currentUid.isNotEmpty)
+        ? currentUid
+        : _currentUserId;
+
+    if (myUid == null || myUid.isEmpty) return;
+    if (message.senderId == myUid) return;
+    if (message.viewedBy.contains(myUid)) return;
+    if (_textSeenOnce.contains(message.id)) return;
+
+    _textSeenOnce.add(message.id);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((txn) async {
+        final docRef = _firestoreMessages.doc(message.id);
+        final snap = await txn.get(docRef);
+        final data = snap.data() as Map<String, dynamic>? ?? {};
+
+        final List<dynamic> viewedByDyn =
+            (data['viewedBy'] as List<dynamic>?) ?? const [];
+        final viewedBy = viewedByDyn.map((e) => e.toString()).toList();
+
+        if (!viewedBy.contains(myUid)) {
+          txn.update(docRef, {
+            'views': FieldValue.increment(1),
+            'viewedBy': FieldValue.arrayUnion([myUid]),
+          });
+        }
+      });
+
+      if (!_isDisposed) {
+        setState(() {
+          if (!message.viewedBy.contains(myUid)) {
+            message.views++;
+            message.viewedBy.add(myUid);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Errore aggiornamento visualizzazioni testo (viewport): $e');
+      _textSeenOnce.remove(message.id);
     }
   }
 
@@ -1199,8 +1277,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           _activeFilters.contains(message.category);
     }).toList();
 
-    // 🔵 NIENTE AppBar qui: lasciamo che la barra blu dell'HomeScreenUI
-    // occupi il top (sparisce la fascia bianca con il secondo "impostazioni").
+    final canSend = _textController.text.trim().isNotEmpty &&
+        _textController.text.characters.length <= 250 &&
+        !_isSendingText;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -1222,7 +1302,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             isWaitingForRelease: _isWaitingForRelease,
             playingMessageId: _playingMessageId,
             radiusOptions: _radiusOptions,
-            onPlayMessage: _playMessage, // wrapper compatibile con la UI
+            onPlayMessage: _playMessage,
             onToggleRadiusSelector: () => setState(() {
               _showRadiusSelector = !_showRadiusSelector;
               if (_showRadiusSelector) {
@@ -1256,8 +1336,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               }
             }),
             onSettingsPressed: () => Navigator.pushNamed(context, '/settings'),
-            onProfilePressed:
-                _refreshAndToggleUserInfo, // << profilo nella barra blu
+            onProfilePressed: _refreshAndToggleUserInfo,
             onPressStart: _handlePressStart,
             onPressEnd: _handlePressEnd,
             onStopRecording: _stopRecording,
@@ -1272,7 +1351,21 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               final prefs = await SharedPreferences.getInstance();
               await prefs.setDouble('selected_radius', r);
             },
+
+            // Input testo
+            textController: _textController,
+            textError: (_textController.text.characters.length > 250)
+                ? 'Max 250 caratteri'
+                : '',
+            onSendText: () {
+              if (canSend) _sendTextMessage();
+            },
+
+            // Visibilità testo (per conteggio "visto")
+            onTextVisible: (m) => _markTextMessageViewed(m),
           ),
+
+          // Pannellino profilo (come prima)
           if (_showUserInfo && _currentUserData != null)
             Positioned(
               top: 60,
@@ -1284,8 +1377,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      // ignore: deprecated_member_use
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.20),
                       blurRadius: 10,
                       spreadRadius: 2,
                     )
@@ -1313,13 +1405,40 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       ],
                     ),
                     const SizedBox(height: 10),
-                    if (_currentUserData!['foto_url'] != null)
-                      CircleAvatar(
-                        backgroundImage: NetworkImage(
-                          _currentUserData!['foto_url'],
-                        ),
+                    (() {
+                      final fotoUrl =
+                          (_currentUserData!['foto_url'] as String?)?.trim();
+                      final nome =
+                          (_currentUserData!['nome'] as String?)?.trim();
+                      if (fotoUrl != null && fotoUrl.isNotEmpty) {
+                        return CircleAvatar(
+                          backgroundImage: NetworkImage(fotoUrl),
+                          radius: 30,
+                        );
+                      }
+                      // fallback: iniziali
+                      String initials = 'A';
+                      if (nome != null && nome.isNotEmpty) {
+                        final parts = nome
+                            .split(RegExp(r'\s+'))
+                            .where((p) => p.isNotEmpty)
+                            .toList();
+                        if (parts.isNotEmpty) {
+                          initials = parts
+                              .take(2)
+                              .map((p) => p.characters.first)
+                              .join()
+                              .toUpperCase();
+                        }
+                      }
+                      return CircleAvatar(
                         radius: 30,
-                      ),
+                        child: Text(
+                          initials,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    })(),
                     const SizedBox(height: 10),
                     Text(
                       'ID utente:',
@@ -1376,6 +1495,117 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 ),
               ),
             ),
+
+          // Barra input testo (overlay in basso)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    // Chip categoria (tap per cambiare)
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _showCategorySelector = !_showCategorySelector;
+                          if (_showCategorySelector) {
+                            _showFilterSelector = false;
+                            _showRadiusSelector = false;
+                          }
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _selectedCategory.color.withAlpha(25),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: _selectedCategory.color),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(_selectedCategory.icon,
+                                size: 16, color: _selectedCategory.color),
+                            const SizedBox(width: 6),
+                            Text(
+                              _selectedCategory.label,
+                              style: TextStyle(color: _selectedCategory.color),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Campo testo
+                    Expanded(
+                      child: TextField(
+                        controller: _textController,
+                        maxLines: 3,
+                        minLines: 1,
+                        maxLength: 250,
+                        decoration: const InputDecoration(
+                          hintText: 'Scrivi un messaggio (max 250)',
+                          counterText: '',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) {
+                          final txt = _textController.text.trim();
+                          if (txt.isNotEmpty &&
+                              txt.characters.length <= 250 &&
+                              !_isSendingText) {
+                            _sendTextMessage();
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Bottone invio
+                    SizedBox(
+                      height: 40,
+                      width: 48,
+                      child: ElevatedButton(
+                        onPressed: (_textController.text.trim().isNotEmpty &&
+                                _textController.text.characters.length <= 250 &&
+                                !_isSendingText)
+                            ? () => _sendTextMessage()
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          shape: const CircleBorder(),
+                        ),
+                        child: _isSendingText
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1456,6 +1686,7 @@ Future<void> _runStartupCleanup() async {
     for (final doc in expiredMessages.docs) {
       try {
         final data = doc.data();
+        final String type = (data['type'] as String?) ?? 'voice'; // ✅ NEW
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 
@@ -1467,7 +1698,9 @@ Future<void> _runStartupCleanup() async {
         if (DateTime.now().isBefore(expirationTime)) continue;
 
         debugPrint('🗑️ [STARTUP] Cancellazione messaggio scaduto: ${doc.id}');
-        if (objectKey.isNotEmpty) {
+
+        // ✅ Skip cancellazione Storj per messaggi testuali
+        if (type != 'text' && objectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(objectKey);
             debugPrint('✅ [STARTUP] File audio cancellato su Storj');
@@ -1519,9 +1752,7 @@ void main() async {
     "background-task",
     "backgroundNotificationHandler",
     frequency: const Duration(minutes: 1),
-    constraints: Constraints(
-      networkType: NetworkType.connected,
-    ),
+    constraints: Constraints(networkType: NetworkType.connected),
     initialDelay: Duration.zero,
   );
 

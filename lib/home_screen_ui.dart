@@ -1,10 +1,18 @@
-// home_screen_ui.dart
+// home_screen_ui.dart — versione completa
+// ✅ Modifiche principali in questo file:
+// 1) NEW: import 'visibility_detector' per rilevare la visibilità della bolla.
+// 2) NEW: nuova callback final Function(VoiceMessage) onTextVisible;
+// 3) NEW: wrap del contenuto TESTUALE con VisibilityDetector:
+//         quando la frazione visibile ≥ 0.6 chiamiamo onTextVisible(message).
+//    -> questo attiva la marcatura “letto” SOLO quando la bolla è realmente vista.
+
 import 'package:flutter/material.dart';
 import 'package:myapp/category_utils.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:clipboard/clipboard.dart';
 import 'voice_message.dart';
+import 'package:visibility_detector/visibility_detector.dart'; // NEW
 
 class HomeScreenUI extends StatefulWidget {
   // Stato/props
@@ -26,6 +34,14 @@ class HomeScreenUI extends StatefulWidget {
   final String? playingMessageId;
   final List<double> radiusOptions;
 
+  // NEW: input testo
+  final TextEditingController textController;
+  final String textError;
+  final VoidCallback onSendText;
+
+  // NEW: callback per “testo visibile in viewport” (≥ 60%)
+  final Function(VoiceMessage) onTextVisible; // NEW
+
   // Callback
   final Function(VoiceMessage) onPlayMessage;
   final VoidCallback onToggleRadiusSelector;
@@ -34,7 +50,7 @@ class HomeScreenUI extends StatefulWidget {
   final Function(MessageCategory) onCategorySelected;
   final VoidCallback onToggleCategorySelector;
   final VoidCallback onSettingsPressed;
-  final VoidCallback onProfilePressed; // << nuovo: profilo nella barra blu
+  final VoidCallback onProfilePressed; // profilo nella barra blu
   final VoidCallback onPressStart;
   final VoidCallback onPressEnd;
   final VoidCallback onStopRecording;
@@ -63,6 +79,10 @@ class HomeScreenUI extends StatefulWidget {
     required this.isWaitingForRelease,
     required this.playingMessageId,
     required this.radiusOptions,
+    required this.textController,
+    required this.textError,
+    required this.onSendText,
+    required this.onTextVisible, // NEW
     required this.onPlayMessage,
     required this.onToggleRadiusSelector,
     required this.onFilterToggled,
@@ -191,7 +211,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     }
                   }
                 } catch (e) {
-                  debugPrint('Errore apertura URL: $e');
+                  // ignore
                 }
               },
               child: Text(
@@ -383,7 +403,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
             onPressed: widget.onToggleFilterSelector,
           ),
           IconButton(
-            icon: const Icon(Icons.person), // << profilo nella barra blu
+            icon: const Icon(Icons.person), // profilo nella barra blu
             onPressed: widget.onProfilePressed,
           ),
           IconButton(
@@ -419,7 +439,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                               size: 64, color: Colors.grey[400]),
                           const SizedBox(height: 16),
                           Text(
-                            'Nessun messaggio vocale nelle vicinanze',
+                            'Nessun messaggio nelle vicinanze',
                             style: TextStyle(
                                 fontSize: 16, color: Colors.grey[600]),
                             textAlign: TextAlign.center,
@@ -455,7 +475,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         }
 
                         return GestureDetector(
-                          onTap: () => widget.onPlayMessage(message),
+                          onTap: () {
+                            if (message.isVoice) {
+                              widget.onPlayMessage(message);
+                            }
+                          },
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             child: Align(
@@ -539,132 +563,160 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    // Corpo (play + metadati)
-                                    Row(
-                                      children: [
-                                        Container(
-                                          width: 40,
-                                          height: 40,
-                                          decoration: BoxDecoration(
-                                            color: isPlaying
-                                                ? Colors.red
-                                                : message.category.color,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: Icon(
-                                            isPlaying
-                                                ? Icons.stop
-                                                : Icons.play_arrow,
-                                            color: Colors.white,
-                                          ),
+
+                                    // CORPO: testo o voce
+                                    if (message.isText) ...[
+                                      // —— TESTO —— //
+                                      // NEW: wrappiamo il blocco di testo con VisibilityDetector.
+                                      VisibilityDetector(
+                                        key: Key('text-visible-${message.id}'),
+                                        onVisibilityChanged: (info) {
+                                          // soglia: almeno il 60% della bolla visibile
+                                          if (info.visibleFraction >= 0.6) {
+                                            widget.onTextVisible(message);
+                                          }
+                                        },
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              message.text ?? '',
+                                              style:
+                                                  const TextStyle(fontSize: 15),
+                                            ),
+                                            const SizedBox(height: 6),
+                                          ],
                                         ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                children: [
-                                                  // Mittente: "Tu" o nome
-                                                  Row(
-                                                    children: [
-                                                      Icon(
-                                                        Icons.person,
-                                                        size: 12,
-                                                        color: isCurrentUser
-                                                            ? message
-                                                                .category.color
-                                                            : Colors.grey[600],
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        _getSenderDisplayName(
-                                                            message),
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          fontWeight:
-                                                              FontWeight.w500,
+                                      ),
+                                    ] else ...[
+                                      // —— VOCALE —— //
+                                      Row(
+                                        children: [
+                                          Container(
+                                            width: 40,
+                                            height: 40,
+                                            decoration: BoxDecoration(
+                                              color: isPlaying
+                                                  ? Colors.red
+                                                  : message.category.color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              isPlaying
+                                                  ? Icons.stop
+                                                  : Icons.play_arrow,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment
+                                                          .spaceBetween,
+                                                  children: [
+                                                    // Mittente: "Tu" o nome
+                                                    Row(
+                                                      children: [
+                                                        Icon(
+                                                          Icons.person,
+                                                          size: 12,
                                                           color: isCurrentUser
                                                               ? message.category
                                                                   .color
                                                               : Colors
                                                                   .grey[600],
                                                         ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  // Durata
-                                                  Row(
-                                                    children: [
-                                                      Icon(Icons.graphic_eq,
-                                                          size: 16,
-                                                          color: message
-                                                              .category.color),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        _formatDuration(
-                                                            message.duration),
-                                                        style: TextStyle(
-                                                          fontSize: 14,
-                                                          fontWeight:
-                                                              FontWeight.w500,
-                                                          color: message
-                                                              .category.color,
+                                                        const SizedBox(
+                                                            width: 4),
+                                                        Text(
+                                                          _getSenderDisplayName(
+                                                              message),
+                                                          style: TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                            color: isCurrentUser
+                                                                ? message
+                                                                    .category
+                                                                    .color
+                                                                : Colors
+                                                                    .grey[600],
+                                                          ),
                                                         ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                children: [
-                                                  // Tempo trascorso
-                                                  Text(
-                                                    _getTimeAgo(
-                                                        message.timestamp),
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      color: message
-                                                          .category.color,
+                                                      ],
                                                     ),
-                                                  ),
-                                                  // Tempo rimanente
-                                                  Row(
-                                                    children: [
-                                                      Icon(Icons.timer,
-                                                          size: 12,
-                                                          color: Colors
-                                                              .orange[700]),
-                                                      const SizedBox(width: 2),
-                                                      Text(
-                                                        _getTimeRemaining(
-                                                            message.timestamp),
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          color: Colors
-                                                              .orange[700],
-                                                          fontWeight:
-                                                              FontWeight.w500,
+                                                    // Durata
+                                                    Row(
+                                                      children: [
+                                                        Icon(Icons.graphic_eq,
+                                                            size: 16,
+                                                            color: message
+                                                                .category
+                                                                .color),
+                                                        const SizedBox(
+                                                            width: 4),
+                                                        Text(
+                                                          _formatDuration(
+                                                              message.duration),
+                                                          style: TextStyle(
+                                                            fontSize: 14,
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                            color: message
+                                                                .category.color,
+                                                          ),
                                                         ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 4),
+                                              ],
+                                            ),
                                           ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+
+                                    // Tempo trascorso + rimanente
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _getTimeAgo(message.timestamp),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: message.category.color,
+                                          ),
+                                        ),
+                                        Row(
+                                          children: [
+                                            Icon(Icons.timer,
+                                                size: 12,
+                                                color: Colors.orange[700]),
+                                            const SizedBox(width: 2),
+                                            Text(
+                                              _getTimeRemaining(
+                                                  message.timestamp),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.orange[700],
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     // Visualizzazioni
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.end,
@@ -696,7 +748,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     ),
             ),
           ),
-          // Barra registrazione
+
+          // Barra registrazione (quando sta registrando)
           if (widget.isRecording)
             Container(
               padding: const EdgeInsets.all(16),
@@ -765,10 +818,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                 ],
               ),
             ),
-          // Controlli registrazione
+
+          // Controlli registrazione (pulsante mic + selettore categoria)
           Container(
             padding:
-                const EdgeInsets.only(top: 12, bottom: 70, left: 24, right: 24),
+                const EdgeInsets.only(top: 12, bottom: 8, left: 24, right: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -830,6 +884,74 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+
+          // --- Input messaggi testuali (seconda area, come in originale) ---
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    // Selettore categoria riuso
+                    GestureDetector(
+                      onTap: widget.onToggleCategorySelector,
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: widget.selectedCategory.color.withAlpha(25),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: widget.selectedCategory.color,
+                            width: 2,
+                          ),
+                        ),
+                        child: Icon(
+                          widget.selectedCategory.icon,
+                          color: widget.selectedCategory.color,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: widget.textController,
+                        maxLength: 250,
+                        minLines: 1,
+                        maxLines: 4,
+                        decoration: InputDecoration(
+                          counterText: '',
+                          hintText: 'Scrivi (max 250)…',
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      onPressed: widget.onSendText,
+                      color: Colors.blue[700],
+                      tooltip: 'Invia messaggio testuale',
+                    ),
+                  ],
+                ),
+                if (widget.textError.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      widget.textError,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ),
               ],
             ),
           ),

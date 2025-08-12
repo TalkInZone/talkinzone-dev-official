@@ -2,23 +2,37 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:myapp/category_utils.dart';
 
-/// Modello messaggio vocale
+/// Supporta sia VOCALI che TESTO
+enum MessageType { voice, text }
+
+/// Modello messaggio
 class VoiceMessage {
   // Base
   final String id;
   final DateTime timestamp;
   final double latitude;
   final double longitude;
-  final Duration duration;
-  final MessageCategory category;
-  final String storjObjectKey;
-  final String senderId;
 
-  // Aggiunte
-  final String name; // <<--- Nome mittente salvato nel documento
-  String? localPath;
+  // VOCE (per i testi restano valori neutri)
+  final Duration duration; // 0 per i messaggi testuali
+  final String storjObjectKey; // "" per i messaggi testuali
+
+  // TESTO (per i vocali resta null)
+  final String? text;
+
+  // Meta
+  final MessageType type; // voice | text
+  final MessageCategory category;
+  final String senderId;
+  final String name;
+
+  // Local-only / stats
+  String? localPath; // solo per voice (download locale)
   int views;
   List<String> viewedBy;
+
+  bool get isVoice => type == MessageType.voice;
+  bool get isText => type == MessageType.text;
 
   VoiceMessage({
     required this.id,
@@ -30,12 +44,14 @@ class VoiceMessage {
     required this.storjObjectKey,
     required this.senderId,
     required this.name,
-    this.localPath,
     required this.views,
     required this.viewedBy,
+    required this.type,
+    this.text,
+    this.localPath,
   });
 
-  /// Costruzione robusta da Firestore
+  /// Costruzione robusta da Firestore (retrocompat: default type=voice)
   factory VoiceMessage.fromFirestore(DocumentSnapshot doc) {
     final data = (doc.data() as Map<String, dynamic>? ?? {});
 
@@ -46,7 +62,15 @@ class VoiceMessage {
     // Cast numerici sicuri
     final double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
     final double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+
+    // Tipo: default "voice" per documenti vecchi
+    final String rawType = (data['type'] as String?) ?? 'voice';
+    final MessageType type =
+        rawType == 'text' ? MessageType.text : MessageType.voice;
+
     final int durSec = (data['duration'] as num?)?.toInt() ?? 0;
+    final String key = (data['storjObjectKey'] as String?) ?? '';
+    final String? text = data['text'] as String?;
 
     // Categoria sicura
     final String catName = (data['category'] as String?) ?? 'free';
@@ -56,7 +80,6 @@ class VoiceMessage {
     );
 
     // Campi basic
-    final String key = (data['storjObjectKey'] as String?) ?? '';
     final String sid = (data['senderId'] as String?) ?? 'unknown';
 
     // Statistiche
@@ -74,13 +97,16 @@ class VoiceMessage {
       timestamp: tsDt,
       latitude: lat,
       longitude: lon,
-      duration: Duration(seconds: durSec),
+      duration:
+          type == MessageType.voice ? Duration(seconds: durSec) : Duration.zero,
       category: cat,
-      storjObjectKey: key,
+      storjObjectKey: type == MessageType.voice ? key : '',
       senderId: sid,
       name: name,
       views: views,
       viewedBy: viewedBy,
+      type: type,
+      text: type == MessageType.text ? (text ?? '') : null,
     );
   }
 
@@ -98,6 +124,8 @@ class VoiceMessage {
     String? localPath,
     int? views,
     List<String>? viewedBy,
+    MessageType? type,
+    String? text,
   }) {
     return VoiceMessage(
       id: id ?? this.id,
@@ -112,6 +140,8 @@ class VoiceMessage {
       localPath: localPath ?? this.localPath,
       views: views ?? this.views,
       viewedBy: viewedBy ?? this.viewedBy,
+      type: type ?? this.type,
+      text: text ?? this.text,
     );
   }
 }
