@@ -1,64 +1,157 @@
-// home_screen_ui.dart — versione completa
-// ✅ Modifiche principali in questo file:
-// 1) NEW: import 'visibility_detector' per rilevare la visibilità della bolla.
-// 2) NEW: nuova callback final Function(VoiceMessage) onTextVisible;
-// 3) NEW: wrap del contenuto TESTUALE con VisibilityDetector:
-//         quando la frazione visibile ≥ 0.6 chiamiamo onTextVisible(message).
-//    -> questo attiva la marcatura “letto” SOLO quando la bolla è realmente vista.
+// =============================================================================
+// 📦 FILE: home_screen_ui.dart
+// =============================================================================
+// Nuvolette chat ripristinate + nome utente ("Tu" sui miei messaggi), timer,
+// viste, reazioni (pressione prolungata) e onda audio animata (solo in play).
+// Nessuna progress bar nella nuvoletta. Dark mode compatibile (no API deprecate).
+// =============================================================================
 
+import 'dart:math' as math;
+import 'dart:async'; // 🔴 MODIFICA: StreamSubscription per listeners reazioni
 import 'package:flutter/material.dart';
-import 'package:myapp/category_utils.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:clipboard/clipboard.dart';
-import 'voice_message.dart';
-import 'package:visibility_detector/visibility_detector.dart'; // NEW
+import 'package:cloud_firestore/cloud_firestore.dart'; // 🔴 MODIFICA: Firestore
 
+import 'category_utils.dart'
+    show
+        MessageCategory,
+        CategorySelector,
+        FilterSelector,
+        loadCustomCategoryName,
+        displayCategoryLabel;
+import 'voice_message.dart';
+
+// Helper compat: sostituisce withOpacity (deprecato)
+Color _alpha(Color c, double opacity01) =>
+    c.withAlpha(((opacity01.clamp(0.0, 1.0)) * 255).round());
+
+// =============================================================================
+// 🎨 Palette adattiva
+// =============================================================================
+class _AdaptivePalette {
+  final Color surface;
+  final Color onSurface;
+  final Color surfaceAlt;
+  final Color onSurfaceAlt;
+  final Color bubbleMine;
+  final Color onBubbleMine;
+  final Color bubbleOther;
+  final Color onBubbleOther;
+  final bool isDark;
+
+  _AdaptivePalette({
+    required this.surface,
+    required this.onSurface,
+    required this.surfaceAlt,
+    required this.onSurfaceAlt,
+    required this.bubbleMine,
+    required this.onBubbleMine,
+    required this.bubbleOther,
+    required this.onBubbleOther,
+    required this.isDark,
+  });
+
+  static _AdaptivePalette of(BuildContext context, {Color? accent}) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final platformDark =
+        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
+    final actuallyDark = theme.brightness == Brightness.dark || platformDark;
+
+    // Fallback dark “sicuro”
+    final ColorScheme darkSafe = ColorScheme.dark(
+      primary: accent ?? cs.primary,
+      secondary: cs.secondary,
+      surface: const Color(0xFF121212),
+      onSurface: const Color(0xFFE6E6E6),
+    );
+
+    if (actuallyDark) {
+      final c = theme.brightness == Brightness.dark ? cs : darkSafe;
+      return _AdaptivePalette(
+        surface: c.surface,
+        onSurface: c.onSurface,
+        surfaceAlt: c.surfaceContainerHighest,
+        onSurfaceAlt: c.onSurface,
+        bubbleMine: _alpha((accent ?? c.primary), 0.22),
+        onBubbleMine: c.onSurface,
+        bubbleOther: _alpha(c.surfaceContainerHighest, 0.35),
+        onBubbleOther: c.onSurface,
+        isDark: true,
+      );
+    } else {
+      return _AdaptivePalette(
+        surface: cs.surface,
+        onSurface: cs.onSurface,
+        surfaceAlt: cs.surfaceContainerHighest,
+        onSurfaceAlt: cs.onSurface,
+        bubbleMine: _alpha((accent ?? cs.primary), 0.12),
+        onBubbleMine: cs.onSurface,
+        bubbleOther: _alpha(cs.surfaceContainerHighest, 0.55),
+        onBubbleOther: Colors.black87,
+        isDark: false,
+      );
+    }
+  }
+}
+
+// =============================================================================
+/* 🧩 HomeScreenUI */
+// =============================================================================
 class HomeScreenUI extends StatefulWidget {
-  // Stato/props
   final bool showWelcomeMessage;
   final bool isInitialized;
   final bool showRadiusSelector;
   final bool showFilterSelector;
-  final Set<MessageCategory> activeFilters;
   final bool showCategorySelector;
+
+  final Set<MessageCategory> activeFilters;
   final MessageCategory selectedCategory;
+
   final List<VoiceMessage> filteredMessages;
   final String? currentUserId;
   final Position? currentPosition;
+
   final double selectedRadius;
+  final List<double> radiusOptions;
+
   final bool isRecording;
   final int recordingSeconds;
   final bool isLongPressRecording;
   final bool isWaitingForRelease;
-  final String? playingMessageId;
-  final List<double> radiusOptions;
 
-  // NEW: input testo
+  final String? playingMessageId;
+
   final TextEditingController textController;
   final String textError;
-  final VoidCallback onSendText;
+  final bool isSendingText;
 
-  // NEW: callback per “testo visibile in viewport” (≥ 60%)
-  final Function(VoiceMessage) onTextVisible; // NEW
+  final void Function(VoiceMessage) onPlayMessage;
 
-  // Callback
-  final Function(VoiceMessage) onPlayMessage;
   final VoidCallback onToggleRadiusSelector;
-  final Function(MessageCategory) onFilterToggled;
+  final void Function(MessageCategory) onFilterToggled;
   final VoidCallback onToggleFilterSelector;
-  final Function(MessageCategory) onCategorySelected;
+
+  final void Function(MessageCategory) onCategorySelected;
   final VoidCallback onToggleCategorySelector;
+
   final VoidCallback onSettingsPressed;
-  final VoidCallback onProfilePressed; // profilo nella barra blu
+  final VoidCallback onProfilePressed;
+
   final VoidCallback onPressStart;
   final VoidCallback onPressEnd;
   final VoidCallback onStopRecording;
   final VoidCallback onStartRecording;
-  final VoidCallback onWelcomeDismissed;
 
-  // cambia raggio
-  final Function(double) onRadiusChanged;
+  final VoidCallback onWelcomeDismissed;
+  final Future<void> Function(double) onRadiusChanged;
+
+  final VoidCallback onSendText;
+
+  final void Function(VoiceMessage) onTextVisible;
+
+  final void Function(VoiceMessage, String) onToggleReaction;
 
   const HomeScreenUI({
     super.key,
@@ -81,8 +174,7 @@ class HomeScreenUI extends StatefulWidget {
     required this.radiusOptions,
     required this.textController,
     required this.textError,
-    required this.onSendText,
-    required this.onTextVisible, // NEW
+    required this.isSendingText,
     required this.onPlayMessage,
     required this.onToggleRadiusSelector,
     required this.onFilterToggled,
@@ -97,6 +189,9 @@ class HomeScreenUI extends StatefulWidget {
     required this.onStartRecording,
     required this.onWelcomeDismissed,
     required this.onRadiusChanged,
+    required this.onSendText,
+    required this.onTextVisible,
+    required this.onToggleReaction,
   });
 
   @override
@@ -104,1023 +199,1394 @@ class HomeScreenUI extends StatefulWidget {
 }
 
 class _HomeScreenUIState extends State<HomeScreenUI> {
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    return '${twoDigits(duration.inMinutes)}:${twoDigits(duration.inSeconds % 60)}';
+  final Set<String> _textVisibilityNotified = {};
+  OverlayEntry? _reactionsOverlay;
+
+  // 🔴 MODIFICA: stato reazioni
+  final Map<String, Map<String, int>> _localReactions = {}; // ottimistico
+  final Map<String, Map<String, int>> _remoteDocReactions =
+      {}; // da messages.reactions
+  final Map<String, Map<String, int>> _remoteEventReactions =
+      {}; // da subcollection
+
+  // 🔴 MODIFICA: subscriptions per doc + subcollection
+  final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
+      _docSubs = {};
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+      _eventSubs = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshReactionSubscriptions(); // 🔴 MODIFICA
   }
 
-  String _getTimeAgo(DateTime timestamp) {
+  @override
+  void didUpdateWidget(covariant HomeScreenUI oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filteredMessages != widget.filteredMessages) {
+      _refreshReactionSubscriptions(); // 🔴 MODIFICA
+    }
+  }
+
+  @override
+  void dispose() {
+    // 🔴 MODIFICA: chiusura listeners
+    for (final s in _docSubs.values) {
+      s.cancel();
+    }
+    for (final s in _eventSubs.values) {
+      s.cancel();
+    }
+    _docSubs.clear();
+    _eventSubs.clear();
+    super.dispose();
+  }
+
+  // 🔴 MODIFICA: attach listeners a doc.reactions e a /reactions_events
+  void _refreshReactionSubscriptions() {
+    final ids = widget.filteredMessages.map((m) => m.id).toSet();
+
+    // rimuovi vecchi
+    for (final id in _docSubs.keys.toList()) {
+      if (!ids.contains(id)) {
+        _docSubs[id]?.cancel();
+        _docSubs.remove(id);
+        _remoteDocReactions.remove(id);
+      }
+    }
+    for (final id in _eventSubs.keys.toList()) {
+      if (!ids.contains(id)) {
+        _eventSubs[id]?.cancel();
+        _eventSubs.remove(id);
+        _remoteEventReactions.remove(id);
+      }
+    }
+
+    // aggiungi nuovi
+    for (final m in widget.filteredMessages) {
+      final docRef =
+          FirebaseFirestore.instance.collection('messages').doc(m.id);
+      if (!_docSubs.containsKey(m.id)) {
+        _docSubs[m.id] = docRef.snapshots().listen((snap) {
+          final data = snap.data();
+          if (data == null) return;
+          final Map<String, int> counts =
+              Map<String, int>.from(data['reactions'] ?? {});
+          final prev = _remoteDocReactions[m.id];
+          if (prev == null || !_mapEquals(prev, counts)) {
+            setState(() {
+              _remoteDocReactions[m.id] = counts;
+            });
+            _reconcileLocalIfCovered(
+                m.id); // 🔴 MODIFICA: riconcilia locale→remoto
+          }
+        });
+      }
+      if (!_eventSubs.containsKey(m.id)) {
+        final evRef = docRef.collection('reactions_events');
+        _eventSubs[m.id] = evRef.snapshots().listen((qs) {
+          final Map<String, int> acc = {};
+          for (final d in qs.docs) {
+            final data = d.data();
+            final e = (data['emoji'] ?? '') as String;
+            if (e.isEmpty) continue;
+            acc[e] = (acc[e] ?? 0) + 1;
+          }
+          final prev = _remoteEventReactions[m.id];
+          if (prev == null || !_mapEquals(prev, acc)) {
+            setState(() {
+              _remoteEventReactions[m.id] = acc;
+            });
+            _reconcileLocalIfCovered(m.id); // 🔴 MODIFICA
+          }
+        });
+      }
+    }
+  }
+
+  // 🔴 MODIFICA: somma sicura tra mappe conteggi
+  Map<String, int> _sumCounts(Map<String, int> a, Map<String, int> b) {
+    final out = <String, int>{}..addAll(a);
+    b.forEach((k, v) => out[k] = (out[k] ?? 0) + v);
+    return out;
+  }
+
+  // 🔴 MODIFICA: se il remoto copre (>=) il locale, rimuovo override locale
+  void _reconcileLocalIfCovered(String id) {
+    final local = _localReactions[id];
+    if (local == null) return;
+    final remote = _combinedRemoteCountsForMessage(id);
+    if (_covers(remote, local)) {
+      setState(() {
+        _localReactions.remove(id);
+      });
+    }
+  }
+
+  // 🔴 MODIFICA: somma doc+event per confronto e UI
+  Map<String, int> _combinedRemoteCountsForMessage(String id) {
+    final a = _remoteDocReactions[id] ?? const <String, int>{};
+    final b = _remoteEventReactions[id] ?? const <String, int>{};
+    return _sumCounts(a, b);
+  }
+
+  // 🔴 MODIFICA: check superset (remote >= local per ogni emoji)
+  bool _covers(Map<String, int> remote, Map<String, int> local) {
+    for (final e in local.entries) {
+      if ((remote[e.key] ?? 0) < e.value) return false;
+    }
+    return true;
+  }
+
+  bool _mapEquals(Map<String, int> a, Map<String, int> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return false;
+    }
+    return true;
+  }
+
+  String _formatRelative(DateTime ts) {
     final now = DateTime.now();
-    final difference = now.difference(timestamp);
-    if (difference.inMinutes < 1) return 'Ora';
-    if (difference.inMinutes < 60) return '${difference.inMinutes}m fa';
-    return '${difference.inHours}h fa';
+    final diff = now.difference(ts);
+    if (diff.inMinutes < 1) return 'Ora';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min fa';
+    if (diff.inHours < 24) return '${diff.inHours} h fa';
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(ts.day)}/${two(ts.month)} ${two(ts.hour)}:${two(ts.minute)}';
   }
 
-  String _getTimeRemaining(DateTime timestamp) {
-    final now = DateTime.now();
-    final elapsed = now.difference(timestamp);
-    final remaining = const Duration(minutes: 5) - elapsed;
-    if (remaining.isNegative) return '0:00';
-    final minutes = remaining.inMinutes;
-    final seconds = remaining.inSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  String _formatDistanceMeters(double meters) {
+    if (meters < 60) return 'Molto vicino';
+    if (meters < 300) return 'Vicino';
+    if (meters < 1000) return '${meters.toStringAsFixed(0)} m';
+    return '${(meters / 1000).toStringAsFixed(1)} km';
   }
 
-  String _getSenderDisplayName(VoiceMessage message) {
-    if (message.senderId == widget.currentUserId) return 'Tu';
-    return message.name.isNotEmpty ? message.name : 'Anonimo';
+  // Bucket qualitativi (solo ricevuti)
+  String _formatDistanceBucket(double meters) {
+    if (meters <= 500) return 'molto vicino';
+    if (meters > 500 && meters <= 1000) return 'vicino';
+    if (meters > 1000 && meters <= 2000) return 'in zona';
+    if (meters > 2000 && meters <= 3000) return 'distante';
+    if (meters > 3000 && meters <= 6000) return 'molto distante';
+    return 'molto distante';
   }
 
-  String _formatDistanceGenerically(double meters) {
-    if (meters < 1000) return 'Molto vicino';
-    if (meters < 3000) return 'Vicino';
-    if (meters < 7000) return 'Nelle vicinanze';
-    return 'Lontano';
+  double _distanceTo(VoiceMessage m) {
+    if (widget.currentPosition == null) return 0.0;
+    return Geolocator.distanceBetween(
+      widget.currentPosition!.latitude,
+      widget.currentPosition!.longitude,
+      m.latitude,
+      m.longitude,
+    );
   }
 
-  Widget _buildWelcomeDialog() {
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text(
-        'Benvenuto in TalkInZone!',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: Colors.blue,
-        ),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+  void _notifyTextVisibleOnce(VoiceMessage m) {
+    if (!m.isText) return;
+    if (_textVisibilityNotified.contains(m.id)) return;
+    _textVisibilityNotified.add(m.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onTextVisible(m);
+    });
+  }
+
+  void _hideReactionsOverlay() {
+    _reactionsOverlay?.remove();
+    _reactionsOverlay = null;
+  }
+
+  // 🔴 MODIFICA: persistenza reazione con fallback più robusto
+  Future<void> _persistReaction(VoiceMessage message, String emoji) async {
+    final docRef =
+        FirebaseFirestore.instance.collection('messages').doc(message.id);
+    try {
+      await docRef.set({
+        'reactions.$emoji': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } on FirebaseException {
+      // 🔴 MODIFICA: fallback su subcollection per QUALSIASI errore Firestore
+      try {
+        await docRef.collection('reactions_events').add({
+          'emoji': emoji,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } on FirebaseException {
+        // Se fallisce anche qui, lascio lo stato locale finché non si riesce
+        // (così non "sparisce" dalla UI).
+      }
+    }
+  }
+
+  // 🔴 MODIFICA: locale incrementale e niente più rimozione in whenComplete
+  void _applyLocalReaction(VoiceMessage message, String emoji) {
+    setState(() {
+      final base = Map<String, int>.from(
+        _localReactions[message.id] ??
+            _combinedRemoteCountsForMessage(message.id),
+      );
+      base[emoji] = (base[emoji] ?? 0) + 1;
+      _localReactions[message.id] = base;
+    });
+
+    _persistReaction(message, emoji).whenComplete(() {
+      // 🔴 MODIFICA: NIENTE rimozione qui.
+      // Verrà rimossa SOLO quando il remoto coprirà i valori locali
+      // (_reconcileLocalIfCovered) in seguito agli snapshot.
+    });
+
+    // Mantengo il tuo callback (se usato altrove)
+    widget.onToggleReaction(message, emoji);
+  }
+
+  void _showReactionsOverlay({
+    required BuildContext context,
+    required GlobalKey anchorKey,
+    required VoiceMessage message,
+  }) {
+    _hideReactionsOverlay();
+    HapticFeedback.mediumImpact();
+
+    final box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayBox =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlayBox == null) return;
+
+    final offset = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final size = box.size;
+
+    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+    _reactionsOverlay = OverlayEntry(
+      builder: (_) {
+        return Stack(
           children: [
-            const Icon(Icons.info_outline, size: 48, color: Colors.blue),
-            const SizedBox(height: 20),
-            const Text(
-              "Questa è una versione pre-alpha, disponibile per un mese.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              "L'app è ancora in costruzione, ma ogni utilizzo ci aiuta a migliorarla.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              "Il nostro obiettivo? Offrire uno strumento versatile per social, promozione ed eventi.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              "Provala e, se qualcosa ti viene in mente, il tuo feedback sarà più che benvenuto!",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                fontStyle: FontStyle.italic,
-                color: Colors.blue,
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _hideReactionsOverlay,
+                child: const SizedBox.expand(),
               ),
             ),
-            const SizedBox(height: 16),
-            InkWell(
-              onTap: () async {
-                const url = 'https://talkinzone-normative.vercel.app/';
-                try {
-                  if (await canLaunchUrl(Uri.parse(url))) {
-                    await launchUrl(
-                      Uri.parse(url),
-                      mode: LaunchMode.externalApplication,
-                    );
-                  } else {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Text('Impossibile aprire il link'),
-                          action: SnackBarAction(
-                            label: 'COPIA LINK',
-                            onPressed: () {
-                              FlutterClipboard.copy(url);
-                            },
-                          ),
+            Positioned(
+              left: offset.dx + (size.width / 2) - 180,
+              top: (offset.dy - 64).clamp(12.0, double.infinity),
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _alpha(Colors.black, 0.92),
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x61000000),
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: emojis.map((e) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          _applyLocalReaction(message, e); // 🔴 MODIFICA
+                          _hideReactionsOverlay();
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          child: Text(e, style: const TextStyle(fontSize: 24)),
                         ),
                       );
-                    }
-                  }
-                } catch (e) {
-                  // ignore
-                }
-              },
-              child: Text(
-                'Informative sulla privacy',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.blue[700],
-                  decoration: TextDecoration.underline,
+                    }).toList(),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: widget.onWelcomeDismissed,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 45, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(_reactionsOverlay!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSendText = widget.textController.text.trim().isNotEmpty &&
+        widget.textController.text.characters.length <= 250 &&
+        !widget.isSendingText;
+
+    final pal =
+        _AdaptivePalette.of(context, accent: widget.selectedCategory.color);
+
+    return Stack(
+      children: [
+        Column(
+          children: [
+            _TopBar(
+              selectedCategory: widget.selectedCategory,
+              onSettingsPressed: widget.onSettingsPressed,
+              onProfilePressed: widget.onProfilePressed,
+              onToggleCategorySelector: widget.onToggleCategorySelector,
+              onToggleFilterSelector: widget.onToggleFilterSelector,
+              onToggleRadiusSelector: widget.onToggleRadiusSelector,
+              selectedRadius: widget.selectedRadius,
+            ),
+
+            if (widget.showCategorySelector)
+              CategorySelector(
+                selectedCategory: widget.selectedCategory,
+                onCategorySelected: widget.onCategorySelected,
+                onClose: widget.onToggleCategorySelector,
+              ),
+
+            if (widget.showFilterSelector)
+              FilterSelector(
+                activeFilters: widget.activeFilters,
+                onFilterToggled: widget.onFilterToggled,
+                onClose: widget.onToggleFilterSelector,
+              ),
+
+            if (widget.showRadiusSelector)
+              _RadiusSelector(
+                current: widget.selectedRadius,
+                options: widget.radiusOptions,
+                onSelected: widget.onRadiusChanged,
+              ),
+
+            const SizedBox(height: 4),
+
+            // Lista nuvolette
+            Expanded(
+              child: widget.isInitialized
+                  ? _MessagesList(
+                      messages: widget.filteredMessages,
+                      playingMessageId: widget.playingMessageId,
+                      currentUserId: widget.currentUserId,
+                      onPlayMessage: widget.onPlayMessage,
+                      onToggleReaction: widget.onToggleReaction,
+                      onTextVisible: _notifyTextVisibleOnce,
+                      labelBuilder: (m) => displayCategoryLabel(
+                        m.category,
+                        messageCustomName: m.customCategoryName,
+                      ),
+                      // 👤 "Tu" sui miei, nome altrui sugli altri
+                      userNameBuilder: (m) {
+                        final myId = widget.currentUserId ?? '';
+                        if (m.senderId == myId) return 'Tu';
+                        final String n = (m.name).trim();
+                        return n.isEmpty ? 'Anonimo' : n;
+                      },
+                      distanceBuilder: (m) {
+                        final d = _distanceTo(m);
+                        final isMine =
+                            m.senderId == (widget.currentUserId ?? '');
+                        return isMine
+                            ? _formatDistanceMeters(d)
+                            : _formatDistanceBucket(d);
+                      },
+                      timeBuilder: _formatRelative,
+                      pal: pal,
+                      showReactionsOverlay: _showReactionsOverlay,
+
+                      // 🔴 MODIFICA: locale > (doc + eventi) > modello
+                      reactionsBuilder: (m) {
+                        final local = _localReactions[m.id];
+                        if (local != null) return local;
+
+                        final combined = _combinedRemoteCountsForMessage(m.id);
+                        if (combined.isNotEmpty) return combined;
+
+                        return m.reactions ?? const <String, int>{};
+                      },
+                    )
+                  : const Center(child: CircularProgressIndicator()),
+            ),
+
+            if (!widget.showWelcomeMessage)
+              _ComposerBar(
+                selectedCategory: widget.selectedCategory,
+                isRecording: widget.isRecording,
+                recordingSeconds: widget.recordingSeconds,
+                isLongPressRecording: widget.isLongPressRecording,
+                isWaitingForRelease: widget.isWaitingForRelease,
+                textController: widget.textController,
+                textError: widget.textError,
+                isSendingText: widget.isSendingText,
+                canSendText: canSendText,
+                onSendText: widget.onSendText,
+                onToggleCategorySelector: widget.onToggleCategorySelector,
+                onPressStart: widget.onPressStart,
+                onPressEnd: widget.onPressEnd,
+                onStartRecording: widget.onStartRecording,
+                onStopRecording: widget.onStopRecording,
+              ),
+          ],
+        ),
+        if (widget.showWelcomeMessage)
+          _WelcomeOverlay(onClose: widget.onWelcomeDismissed),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// 🔼 Top bar
+// =============================================================================
+class _TopBar extends StatelessWidget {
+  final MessageCategory selectedCategory;
+  final VoidCallback onSettingsPressed;
+  final VoidCallback onProfilePressed;
+  final VoidCallback onToggleCategorySelector;
+  final VoidCallback onToggleFilterSelector;
+  final VoidCallback onToggleRadiusSelector;
+  final double selectedRadius;
+
+  const _TopBar({
+    required this.selectedCategory,
+    required this.onSettingsPressed,
+    required this.onProfilePressed,
+    required this.onToggleCategorySelector,
+    required this.onToggleFilterSelector,
+    required this.onToggleRadiusSelector,
+    required this.selectedRadius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selectedCategory.color;
+    final pal = _AdaptivePalette.of(context, accent: color);
+
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Impostazioni',
+              onPressed: onSettingsPressed,
+              icon: const Icon(Icons.settings),
+            ),
+            Expanded(
+              child: GestureDetector(
+                onTap: onToggleCategorySelector,
+                child: FutureBuilder<String?>(
+                  future: loadCustomCategoryName(),
+                  builder: (context, snap) {
+                    final label = displayCategoryLabel(
+                      selectedCategory,
+                      prefsCustomName: snap.data,
+                    );
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _alpha(pal.surfaceAlt, 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: color, width: 1),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(selectedCategory.icon, size: 18, color: color),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              label,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: color,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Icon(Icons.expand_more, color: color, size: 18),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
-              child: const Text(
-                'INIZIA AD USARE',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Filtri',
+              onPressed: onToggleFilterSelector,
+              icon: const Icon(Icons.filter_list),
+            ),
+            IconButton(
+              tooltip: 'Raggio',
+              onPressed: onToggleRadiusSelector,
+              icon: const Icon(Icons.radar),
+            ),
+            IconButton(
+              tooltip: 'Profilo',
+              onPressed: onProfilePressed,
+              icon: const Icon(Icons.person),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildRadiusSelector() {
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 300),
-      child: Visibility(
-        visible: widget.showRadiusSelector,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: (widget.isRecording
-                        ? widget.selectedCategory.color
-                        : Colors.blue)
-                    .withAlpha(77),
-                spreadRadius: widget.isRecording ? 8 : 4,
-                blurRadius: widget.isRecording ? 16 : 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                top: 8,
-                right: 8,
-                child: GestureDetector(
-                  onTap: widget.onToggleRadiusSelector,
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.close, size: 16),
-                  ),
+// =============================================================================
+// 📡 Radius selector
+// =============================================================================
+class _RadiusSelector extends StatelessWidget {
+  final double current;
+  final List<double> options;
+  final Future<void> Function(double) onSelected;
+
+  const _RadiusSelector({
+    required this.current,
+    required this.options,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = _AdaptivePalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Card(
+        color: pal.surface,
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Wrap(
+            spacing: 8,
+            children: options.map((r) {
+              final selected = r == current;
+              return ChoiceChip(
+                selected: selected,
+                label: Text(
+                  r >= 1000
+                      ? '${(r / 1000).toStringAsFixed(1)} km'
+                      : '${r.toStringAsFixed(0)} m',
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Seleziona raggio di visualizzazione:',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: widget.radiusOptions.map((radius) {
-                      final isSelected = widget.selectedRadius == radius;
-                      return ChoiceChip(
-                        label: Text(
-                          radius < 1000
-                              ? '${radius.toInt()} m'
-                              : '${(radius / 1000).toStringAsFixed(0)} km',
-                        ),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          if (selected) widget.onRadiusChanged(radius);
-                        },
-                        selectedColor: Colors.blue[100],
-                        backgroundColor: Colors.grey[200],
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.blue[800] : Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Messaggi entro ${widget.selectedRadius < 1000 ? '${widget.selectedRadius.toInt()} metri' : '${(widget.selectedRadius / 1000).toInt()} km'}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.blue[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                onSelected: (_) => onSelected(r),
+              );
+            }).toList(),
           ),
         ),
       ),
     );
   }
+}
+
+// =============================================================================
+// 📨 Lista messaggi
+// =============================================================================
+class _MessagesList extends StatelessWidget {
+  final List<VoiceMessage> messages;
+  final String? playingMessageId;
+  final String? currentUserId;
+  final void Function(VoiceMessage) onPlayMessage;
+  final void Function(VoiceMessage) onTextVisible;
+  final String Function(VoiceMessage) labelBuilder;
+  final String Function(VoiceMessage) userNameBuilder;
+  final String Function(VoiceMessage) distanceBuilder;
+  final String Function(DateTime) timeBuilder;
+  final void Function(VoiceMessage, String) onToggleReaction;
+  final _AdaptivePalette pal;
+  final void Function({
+    required BuildContext context,
+    required GlobalKey anchorKey,
+    required VoiceMessage message,
+  }) showReactionsOverlay;
+
+  // 🔴 MODIFICA: reazioni da mostrare
+  final Map<String, int> Function(VoiceMessage) reactionsBuilder;
+
+  const _MessagesList({
+    required this.messages,
+    required this.playingMessageId,
+    required this.currentUserId,
+    required this.onPlayMessage,
+    required this.onTextVisible,
+    required this.labelBuilder,
+    required this.userNameBuilder,
+    required this.distanceBuilder,
+    required this.timeBuilder,
+    required this.onToggleReaction,
+    required this.pal,
+    required this.showReactionsOverlay,
+    required this.reactionsBuilder,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (widget.showWelcomeMessage) {
-      return Scaffold(
-        backgroundColor: Colors.grey[100],
-        body: Center(child: _buildWelcomeDialog()),
+    if (messages.isEmpty) {
+      return const Center(
+        child: Text('Nessun messaggio nella tua zona…',
+            style: TextStyle(color: Colors.grey)),
       );
     }
 
-    if (!widget.isInitialized) {
-      return const Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Inizializzazione in corso...'),
-            ],
+    return ListView.builder(
+      reverse: true, // chat-style
+      padding: const EdgeInsets.only(bottom: 96, top: 6),
+      itemCount: messages.length,
+      itemBuilder: (context, i) {
+        final m = messages[i];
+
+        if (m.isText &&
+            (m.text ?? '').trim().isNotEmpty &&
+            m.senderId != (currentUserId ?? '')) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => onTextVisible(m));
+        }
+
+        final isMine = m.senderId == (currentUserId ?? '');
+        final isPlaying = playingMessageId == m.id;
+        final reactions = reactionsBuilder(m);
+
+        return _ChatBubble(
+          message: m,
+          isMine: isMine,
+          isPlaying: isPlaying,
+          categoryLabel: labelBuilder(m),
+          userName: userNameBuilder(m),
+          distanceLabel: distanceBuilder(m),
+          timeLabel: timeBuilder(m.timestamp),
+          onPlay: () => onPlayMessage(m),
+          onLongPress: (key) => showReactionsOverlay(
+            context: context,
+            anchorKey: key,
+            message: m,
           ),
-        ),
+          onToggleReaction: (emoji) => onToggleReaction(m, emoji),
+          pal: pal,
+          reactions: reactions,
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// 💬 Chat bubble (spazio reazioni DENTRO la bolla, sotto il body)
+// =============================================================================
+class _ChatBubble extends StatelessWidget {
+  final VoiceMessage message;
+  final bool isMine;
+  final bool isPlaying;
+  final String categoryLabel;
+  final String userName; // 👈 "Tu" o nome utente
+  final String distanceLabel;
+  final String timeLabel;
+  final VoidCallback onPlay;
+  final void Function(GlobalKey) onLongPress;
+  final void Function(String emoji) onToggleReaction;
+  final _AdaptivePalette pal;
+
+  // 🔴 MODIFICA: reazioni già composte
+  final Map<String, int> reactions;
+
+  _ChatBubble({
+    required this.message,
+    required this.isMine,
+    required this.isPlaying,
+    required this.categoryLabel,
+    required this.userName,
+    required this.distanceLabel,
+    required this.timeLabel,
+    required this.onPlay,
+    required this.onLongPress,
+    required this.onToggleReaction,
+    required this.pal,
+    required this.reactions,
+  });
+
+  final GlobalKey _bubbleKey = GlobalKey();
+
+  String _countdownLeft(DateTime ts) {
+    final expiry = ts.add(const Duration(minutes: 5));
+    final left = expiry.difference(DateTime.now());
+    final total = left.isNegative ? Duration.zero : left;
+    final m = total.inMinutes;
+    final s = total.inSeconds % 60;
+    final mm = m.toString();
+    final ss = s.toString().padLeft(2, '0');
+    return '$mm:$ss';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = message.category.color;
+
+    final Color bubbleBg = isMine ? pal.bubbleMine : pal.bubbleOther;
+    final Color textColor = isMine ? pal.onBubbleMine : pal.onBubbleOther;
+
+    final alignment = isMine ? Alignment.centerRight : Alignment.centerLeft;
+    final cross = isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+
+    const Radius r = Radius.circular(16);
+    final borderRadius = isMine
+        ? const BorderRadius.only(
+            topLeft: r,
+            topRight: r,
+            bottomLeft: r,
+            bottomRight: Radius.circular(6),
+          )
+        : const BorderRadius.only(
+            topLeft: r,
+            topRight: r,
+            bottomRight: r,
+            bottomLeft: Radius.circular(6),
+          );
+
+    final bool hasReactions = reactions.entries.any((e) => e.value > 0);
+
+    Widget viewsChip() {
+      final views = message.views;
+      final label = views <= 0 ? 'Nuovo' : views.toString();
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.remove_red_eye, size: 14, color: Colors.grey[600]),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+        ],
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('TalkInZone'),
-        backgroundColor: Colors.blue[700],
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.place),
-            onPressed: widget.onToggleRadiusSelector,
-          ),
-          IconButton(
-            icon: Stack(
-              children: [
-                const Icon(Icons.filter_list),
-                if (widget.activeFilters.length < MessageCategory.values.length)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.orange,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            onPressed: widget.onToggleFilterSelector,
-          ),
-          IconButton(
-            icon: const Icon(Icons.person), // profilo nella barra blu
-            onPressed: widget.onProfilePressed,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: widget.onSettingsPressed,
+    Widget countdownChip() {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer, size: 14, color: Colors.orange[700]),
+          const SizedBox(width: 4),
+          Text(
+            _countdownLeft(message.timestamp),
+            style: TextStyle(fontSize: 12, color: Colors.orange[800]),
           ),
         ],
-      ),
-      body: Column(
-        children: [
-          _buildRadiusSelector(),
-          if (widget.showFilterSelector)
-            FilterSelector(
-              activeFilters: widget.activeFilters,
-              onFilterToggled: widget.onFilterToggled,
-              onClose: widget.onToggleFilterSelector,
-            ),
-          if (widget.showCategorySelector)
-            CategorySelector(
-              selectedCategory: widget.selectedCategory,
-              onCategorySelected: widget.onCategorySelected,
-              onClose: widget.onToggleCategorySelector,
-            ),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              child: widget.filteredMessages.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.mic_none,
-                              size: 64, color: Colors.grey[400]),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Nessun messaggio nelle vicinanze',
-                            style: TextStyle(
-                                fontSize: 16, color: Colors.grey[600]),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            widget.selectedRadius < 1000
-                                ? 'Raggio di visualizzazione: ${widget.selectedRadius.toInt()} metri'
-                                : 'Raggio di visualizzazione: ${(widget.selectedRadius / 1000).toStringAsFixed(1)} km',
-                            style: const TextStyle(
-                                fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      reverse: true,
-                      itemCount: widget.filteredMessages.length,
-                      itemBuilder: (context, index) {
-                        final message = widget.filteredMessages[index];
-                        final isPlaying = widget.playingMessageId == message.id;
-                        final isCurrentUser =
-                            message.senderId == widget.currentUserId;
+      );
+    }
 
-                        double? distance;
-                        if (widget.currentPosition != null) {
-                          distance = Geolocator.distanceBetween(
-                            widget.currentPosition!.latitude,
-                            widget.currentPosition!.longitude,
-                            message.latitude,
-                            message.longitude,
-                          );
-                        }
-
-                        return GestureDetector(
-                          onTap: () {
-                            if (message.isVoice) {
-                              widget.onPlayMessage(message);
-                            }
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            child: Align(
-                              alignment: isCurrentUser
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: Container(
-                                constraints: BoxConstraints(
-                                  maxWidth:
-                                      MediaQuery.of(context).size.width * 0.75,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Align(
+        alignment: alignment,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.86,
+          ),
+          child: Column(
+            crossAxisAlignment: cross,
+            children: [
+              GestureDetector(
+                key: _bubbleKey,
+                onLongPress: () => onLongPress(_bubbleKey),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: bubbleBg,
+                    borderRadius: borderRadius,
+                    border: Border.all(color: _alpha(accent, 0.35), width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _alpha(Colors.black, 0.05),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      )
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Header: categoria + distanza
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+                        child: Row(
+                          children: [
+                            Icon(message.category.icon,
+                                size: 16, color: accent),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                categoryLabel,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: accent,
                                 ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: message.category.color.withAlpha(25),
-                                  borderRadius: BorderRadius.only(
-                                    topLeft: const Radius.circular(18),
-                                    topRight: const Radius.circular(18),
-                                    bottomLeft:
-                                        Radius.circular(isCurrentUser ? 18 : 4),
-                                    bottomRight:
-                                        Radius.circular(isCurrentUser ? 4 : 18),
-                                  ),
-                                  border: Border.all(
-                                    color: message.category.color,
-                                    width: 1.5,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withAlpha(25),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Intestazione (categoria + distanza)
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              message.category.icon,
-                                              size: 14,
-                                              color: message.category.color,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              message.category.label,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: message.category.color,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        if (distance != null)
-                                          Row(
-                                            children: [
-                                              Icon(Icons.place,
-                                                  size: 12,
-                                                  color: Colors.grey[600]),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                _formatDistanceGenerically(
-                                                    distance),
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: Colors.grey[600],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-
-                                    // CORPO: testo o voce
-                                    if (message.isText) ...[
-                                      // —— TESTO —— //
-                                      // NEW: wrappiamo il blocco di testo con VisibilityDetector.
-                                      VisibilityDetector(
-                                        key: Key('text-visible-${message.id}'),
-                                        onVisibilityChanged: (info) {
-                                          // soglia: almeno il 60% della bolla visibile
-                                          if (info.visibleFraction >= 0.6) {
-                                            widget.onTextVisible(message);
-                                          }
-                                        },
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              message.text ?? '',
-                                              style:
-                                                  const TextStyle(fontSize: 15),
-                                            ),
-                                            const SizedBox(height: 6),
-                                          ],
-                                        ),
-                                      ),
-                                    ] else ...[
-                                      // —— VOCALE —— //
-                                      Row(
-                                        children: [
-                                          Container(
-                                            width: 40,
-                                            height: 40,
-                                            decoration: BoxDecoration(
-                                              color: isPlaying
-                                                  ? Colors.red
-                                                  : message.category.color,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Icon(
-                                              isPlaying
-                                                  ? Icons.stop
-                                                  : Icons.play_arrow,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment
-                                                          .spaceBetween,
-                                                  children: [
-                                                    // Mittente: "Tu" o nome
-                                                    Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.person,
-                                                          size: 12,
-                                                          color: isCurrentUser
-                                                              ? message.category
-                                                                  .color
-                                                              : Colors
-                                                                  .grey[600],
-                                                        ),
-                                                        const SizedBox(
-                                                            width: 4),
-                                                        Text(
-                                                          _getSenderDisplayName(
-                                                              message),
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                            color: isCurrentUser
-                                                                ? message
-                                                                    .category
-                                                                    .color
-                                                                : Colors
-                                                                    .grey[600],
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    // Durata
-                                                    Row(
-                                                      children: [
-                                                        Icon(Icons.graphic_eq,
-                                                            size: 16,
-                                                            color: message
-                                                                .category
-                                                                .color),
-                                                        const SizedBox(
-                                                            width: 4),
-                                                        Text(
-                                                          _formatDuration(
-                                                              message.duration),
-                                                          style: TextStyle(
-                                                            fontSize: 14,
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                            color: message
-                                                                .category.color,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 4),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                    ],
-
-                                    // Tempo trascorso + rimanente
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(
-                                          _getTimeAgo(message.timestamp),
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: message.category.color,
-                                          ),
-                                        ),
-                                        Row(
-                                          children: [
-                                            Icon(Icons.timer,
-                                                size: 12,
-                                                color: Colors.orange[700]),
-                                            const SizedBox(width: 2),
-                                            Text(
-                                              _getTimeRemaining(
-                                                  message.timestamp),
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.orange[700],
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    // Visualizzazioni
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        Icon(Icons.remove_red_eye,
-                                            size: 14, color: Colors.grey[600]),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          message.views > 0
-                                              ? '${message.views}'
-                                              : 'Nuovo',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: message.views > 0
-                                                ? Colors.grey[600]
-                                                : Colors.orange,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.location_on,
+                                size: 16, color: Colors.grey),
+                            const SizedBox(width: 2),
+                            Text(
+                              distanceLabel,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[700]),
+                            ),
+                          ],
+                        ),
+                      ),
 
-          // Barra registrazione (quando sta registrando)
-          if (widget.isRecording)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: widget.selectedCategory.color.withAlpha(25),
-                border: Border(
-                  top: BorderSide(
-                    color: widget.selectedCategory.color,
-                    width: 2,
-                  ),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(widget.selectedCategory.icon,
-                          color: widget.selectedCategory.color, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Registrando ${widget.selectedCategory.label}...',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: widget.selectedCategory.color,
+                      // 👤 Nome utente
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person,
+                                size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                userName,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Body (testo o voce)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                        child: message.isText
+                            ? Text(
+                                message.text ?? '',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: textColor,
+                                  height: 1.25,
+                                ),
+                              )
+                            : _VoiceRow(
+                                duration: message.duration,
+                                isPlaying: isPlaying,
+                                onPlay: onPlay,
+                                accent: accent,
+                                textColor: textColor,
+                              ),
+                      ),
+
+                      // 🔴 MODIFICA: SPAZIO REAZIONI STABILE DENTRO LA BOLLA
+                      if (hasReactions)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+                          child: Align(
+                            alignment: isMine
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: _ReactionsPill(
+                              reactions: reactions,
+                              isMine: isMine,
+                              pal: pal,
+                            ),
+                          ),
+                        ),
+
+                      // Footer: ora + countdown + viste
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+                        child: Row(
+                          children: [
+                            Text(
+                              timeLabel,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Spacer(),
+                            countdownChip(),
+                            const SizedBox(width: 12),
+                            viewsChip(),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${widget.recordingSeconds.toString().padLeft(2, '0')} / 15',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: widget.selectedCategory.color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 🔧 Widget pill reazioni (emoji + conteggio)
+class _ReactionsPill extends StatelessWidget {
+  final Map<String, int> reactions;
+  final bool isMine;
+  final _AdaptivePalette pal;
+
+  const _ReactionsPill({
+    required this.reactions,
+    required this.isMine,
+    required this.pal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = reactions.entries.where((e) => e.value > 0).toList()
+      ..sort((a, b) {
+        final c = b.value.compareTo(a.value);
+        return c != 0 ? c : a.key.compareTo(b.key);
+      });
+
+    final bg =
+        isMine ? _alpha(pal.bubbleMine, 0.9) : _alpha(pal.bubbleOther, 0.9);
+    final border = _alpha(Colors.black, 0.08);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _alpha(Colors.black, 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 2,
+        children: entries.map((e) {
+          final showCount = e.value > 1;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(e.key, style: const TextStyle(fontSize: 14)),
+              if (showCount) ...[
+                const SizedBox(width: 2),
+                Text(
+                  e.value.toString(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    // ignore: deprecated_member_use
+                    color: pal.onSurface.withOpacity(0.75),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// 🎵 Riga audio con Onda ANIMATA (no progress bar)
+// =============================================================================
+class _VoiceRow extends StatefulWidget {
+  final int duration;
+  final bool isPlaying;
+  final VoidCallback onPlay;
+  final Color accent;
+  final Color textColor;
+
+  const _VoiceRow({
+    required this.duration,
+    required this.isPlaying,
+    required this.onPlay,
+    required this.accent,
+    required this.textColor,
+  });
+
+  @override
+  State<_VoiceRow> createState() => _VoiceRowState();
+}
+
+class _VoiceRowState extends State<_VoiceRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+
+    if (widget.isPlaying) _ctrl.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VoiceRow old) {
+    super.didUpdateWidget(old);
+    if (widget.isPlaying && !_ctrl.isAnimating) {
+      _ctrl.repeat();
+    } else if (!widget.isPlaying && _ctrl.isAnimating) {
+      _ctrl.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final icon =
+        widget.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill;
+    return Row(
+      children: [
+        InkWell(
+          onTap: widget.onPlay,
+          child: Icon(icon, size: 36, color: widget.accent),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: SizedBox(
+            height: 22,
+            child: AnimatedBuilder(
+              animation: _ctrl,
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _AnimatedWavePainter(
+                    color: _alpha(widget.accent, 0.85),
+                    progress: _ctrl.value, // 0..1
+                    playing: widget.isPlaying,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${widget.duration}s',
+          style: TextStyle(color: _alpha(widget.textColor, 0.8)),
+        ),
+      ],
+    );
+  }
+}
+
+class _AnimatedWavePainter extends CustomPainter {
+  final Color color;
+  final double progress; // 0..1
+  final bool playing;
+
+  _AnimatedWavePainter({
+    required this.color,
+    required this.progress,
+    required this.playing,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final path = Path();
+
+    final double amp = size.height / 3 * (playing ? 1.0 : 0.6);
+    const double k = 10;
+    final double phase = progress * 2 * math.pi;
+
+    for (double x = 0; x <= size.width; x += 6) {
+      final y = size.height / 2 + math.sin((x / k) + phase) * amp;
+      if (x == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _AnimatedWavePainter old) {
+    return old.progress != progress ||
+        old.color != color ||
+        old.playing != playing;
+  }
+}
+
+// =============================================================================
+// 🧰 Composer
+// =============================================================================
+class _ComposerBar extends StatelessWidget {
+  final MessageCategory selectedCategory;
+  final bool isRecording;
+  final int recordingSeconds;
+  final bool isLongPressRecording;
+  final bool isWaitingForRelease;
+
+  final TextEditingController textController;
+  final String textError;
+  final bool isSendingText;
+  final bool canSendText;
+
+  final VoidCallback onSendText;
+  final VoidCallback onToggleCategorySelector;
+  final VoidCallback onPressStart;
+  final VoidCallback onPressEnd;
+  final VoidCallback onStartRecording;
+  final VoidCallback onStopRecording;
+
+  const _ComposerBar({
+    required this.selectedCategory,
+    required this.isRecording,
+    required this.recordingSeconds,
+    required this.isLongPressRecording,
+    required this.isWaitingForRelease,
+    required this.textController,
+    required this.textError,
+    required this.isSendingText,
+    required this.canSendText,
+    required this.onSendText,
+    required this.onToggleCategorySelector,
+    required this.onPressStart,
+    required this.onPressEnd,
+    required this.onStartRecording,
+    required this.onStopRecording,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selectedCategory.color;
+    final pal = _AdaptivePalette.of(context, accent: color);
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: onToggleCategorySelector,
+              child: FutureBuilder<String?>(
+                future: loadCustomCategoryName(),
+                builder: (context, snap) {
+                  final label = displayCategoryLabel(
+                    selectedCategory,
+                    prefsCustomName: snap.data,
+                  );
+                  return Row(
+                    children: [
+                      Icon(selectedCategory.icon, color: color, size: 18),
+                      const SizedBox(width: 6),
+                      Text(label,
+                          style: TextStyle(
+                              color: color, fontWeight: FontWeight.w600)),
+                      const SizedBox(width: 4),
+                      Icon(Icons.edit, size: 16, color: color),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: textController,
+                    maxLines: 3,
+                    minLines: 1,
+                    maxLength: 250,
+                    decoration: InputDecoration(
+                      hintText: 'Scrivi un messaggio (max 250)…',
+                      counterText: '',
+                      errorText: textError.isEmpty ? null : textError,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      filled: true,
+                      fillColor: _alpha(pal.surfaceAlt, 0.4),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
+                    onSubmitted: (_) {
+                      if (canSendText) onSendText();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: canSendText ? onSendText : null,
+                  icon: isSendingText
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send),
+                ),
+                const SizedBox(width: 6),
+                _MicButton(
+                  accent: color,
+                  isRecording: isRecording,
+                  seconds: recordingSeconds,
+                  isLongPressRecording: isLongPressRecording,
+                  isWaitingForRelease: isWaitingForRelease,
+                  onPressStart: onPressStart,
+                  onPressEnd: onPressEnd,
+                  onStartRecording: onStartRecording,
+                  onStopRecording: onStopRecording,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MicButton extends StatelessWidget {
+  final Color accent;
+  final bool isRecording;
+  final int seconds;
+  final bool isLongPressRecording;
+  final bool isWaitingForRelease;
+  final VoidCallback onPressStart;
+  final VoidCallback onPressEnd;
+  final VoidCallback onStartRecording;
+  final VoidCallback onStopRecording;
+
+  const _MicButton({
+    required this.accent,
+    required this.isRecording,
+    required this.seconds,
+    required this.isLongPressRecording,
+    required this.isWaitingForRelease,
+    required this.onPressStart,
+    required this.onPressEnd,
+    required this.onStartRecording,
+    required this.onStopRecording,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg =
+        isRecording ? accent : Theme.of(context).colorScheme.primaryContainer;
+    final fg = isRecording
+        ? Colors.white
+        : Theme.of(context).colorScheme.onPrimaryContainer;
+
+    return GestureDetector(
+      onLongPressStart: (_) => onPressStart(),
+      onLongPressEnd: (_) => onPressEnd(),
+      onTap: () {
+        if (isRecording) {
+          onStopRecording();
+        } else {
+          onStartRecording();
+        }
+      },
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: bg,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: _alpha(accent, isRecording ? 0.45 : 0.15),
+              blurRadius: isRecording ? 12 : 6,
+              spreadRadius: isRecording ? 2 : 0,
+            )
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.mic, color: fg),
+            if (isRecording)
+              Positioned(
+                bottom: 6,
+                child: Text(
+                  seconds.toString(),
+                  style: const TextStyle(fontSize: 10, color: Colors.white),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// 👋 Overlay benvenuto
+// =============================================================================
+class _WelcomeOverlay extends StatelessWidget {
+  final VoidCallback onClose;
+  const _WelcomeOverlay({required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = _AdaptivePalette.of(context);
+    return Container(
+      color: _alpha(Colors.black, 0.35),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            color: pal.surface,
+            elevation: 8,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.waving_hand, size: 48),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Benvenuto!',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: widget.recordingSeconds / 15.0,
-                    backgroundColor: Colors.grey[300],
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      widget.selectedCategory.color,
-                    ),
+                  const Text(
+                    'Completa i dati richiesti per iniziare a usare TalkInZone.',
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(5, (index) {
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 4,
-                        height: widget.recordingSeconds % 3 == index % 3
-                            ? 30 - index * 5
-                            : 20 - index * 3,
-                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                        decoration: BoxDecoration(
-                          color: widget.selectedCategory.color,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      );
-                    }),
+                  FilledButton(
+                    onPressed: onClose,
+                    child: const Text('Ho capito'),
                   ),
                 ],
               ),
             ),
-
-          // Controlli registrazione (pulsante mic + selettore categoria)
-          Container(
-            padding:
-                const EdgeInsets.only(top: 12, bottom: 8, left: 24, right: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (!widget.isRecording)
-                  GestureDetector(
-                    onTap: widget.onToggleCategorySelector,
-                    child: Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        color: widget.selectedCategory.color.withAlpha(25),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: widget.selectedCategory.color,
-                          width: 2,
-                        ),
-                      ),
-                      child: Icon(
-                        widget.selectedCategory.icon,
-                        color: widget.selectedCategory.color,
-                        size: 24,
-                      ),
-                    ),
-                  ),
-                if (!widget.isRecording) const SizedBox(width: 16),
-                Listener(
-                  onPointerDown: (_) => widget.onPressStart(),
-                  onPointerUp: (_) => widget.onPressEnd(),
-                  onPointerCancel: (_) => widget.onPressEnd(),
-                  child: GestureDetector(
-                    onTap: widget.isRecording
-                        ? widget.onStopRecording
-                        : widget.onStartRecording,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: widget.isRecording
-                            ? widget.selectedCategory.color
-                            : Colors.blue,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (widget.isRecording
-                                    ? widget.selectedCategory.color
-                                    : Colors.blue)
-                                .withAlpha(77),
-                            spreadRadius: widget.isRecording ? 8 : 4,
-                            blurRadius: widget.isRecording ? 16 : 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        widget.isRecording ? Icons.stop : Icons.mic,
-                        size: 40,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
-
-          // --- Input messaggi testuali (seconda area, come in originale) ---
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    // Selettore categoria riuso
-                    GestureDetector(
-                      onTap: widget.onToggleCategorySelector,
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: widget.selectedCategory.color.withAlpha(25),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: widget.selectedCategory.color,
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(
-                          widget.selectedCategory.icon,
-                          color: widget.selectedCategory.color,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: widget.textController,
-                        maxLength: 250,
-                        minLines: 1,
-                        maxLines: 4,
-                        decoration: InputDecoration(
-                          counterText: '',
-                          hintText: 'Scrivi (max 250)…',
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: widget.onSendText,
-                      color: Colors.blue[700],
-                      tooltip: 'Invia messaggio testuale',
-                    ),
-                  ],
-                ),
-                if (widget.textError.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      widget.textError,
-                      style: const TextStyle(color: Colors.red, fontSize: 12),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ------------------ FilterSelector ------------------
-class FilterSelector extends StatelessWidget {
-  final Set<MessageCategory> activeFilters;
-  final Function(MessageCategory) onFilterToggled;
-  final VoidCallback onClose;
-
-  const FilterSelector({
-    super.key,
-    required this.activeFilters,
-    required this.onFilterToggled,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.blue.withAlpha(77),
-            spreadRadius: 4,
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Filtra per categoria:',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              IconButton(icon: const Icon(Icons.close), onPressed: onClose),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: MessageCategory.values.map((category) {
-              final isActive = activeFilters.contains(category);
-              return FilterChip(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      category.icon,
-                      size: 16,
-                      color: isActive ? Colors.white : category.color,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      category.label,
-                      style: TextStyle(
-                        color: isActive ? Colors.white : Colors.black,
-                      ),
-                    ),
-                  ],
-                ),
-                selected: isActive,
-                onSelected: (_) => onFilterToggled(category),
-                selectedColor: category.color,
-                backgroundColor: Colors.grey[200],
-                checkmarkColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ------------------ CategorySelector ------------------
-class CategorySelector extends StatelessWidget {
-  final MessageCategory selectedCategory;
-  final Function(MessageCategory) onCategorySelected;
-  final VoidCallback onClose;
-
-  const CategorySelector({
-    super.key,
-    required this.selectedCategory,
-    required this.onCategorySelected,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: selectedCategory.color.withAlpha(77),
-            spreadRadius: 4,
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Seleziona categoria:',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              IconButton(icon: const Icon(Icons.close), onPressed: onClose),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: MessageCategory.values.map((category) {
-              return ChoiceChip(
-                label: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(category.icon, size: 16, color: category.color),
-                    const SizedBox(width: 4),
-                    Text(category.label),
-                  ],
-                ),
-                selected: selectedCategory == category,
-                onSelected: (selected) {
-                  if (selected) onCategorySelected(category);
-                },
-                selectedColor: category.color.withAlpha(50),
-                backgroundColor: Colors.grey[200],
-                labelStyle: TextStyle(
-                  color: selectedCategory == category
-                      ? category.color
-                      : Colors.black,
-                  fontWeight: FontWeight.w500,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
+        ),
       ),
     );
   }

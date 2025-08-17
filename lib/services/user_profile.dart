@@ -5,7 +5,8 @@
 // - Fornisce default per nuove chiavi (auto-migrazione non distruttiva).
 // - Esegue upsert al login (crea/aggiorna), aggiunge chiavi mancanti,
 //   e opzionalmente rimuove (pruning) chiavi non più presenti nello script.
-// - Espone helper per aggiornare solo ultimo_accesso o gestire id_bloccati.
+// - Espone helper per aggiornare solo ultimo_accesso, gestire id_bloccati,
+//   e impostare/cancellare data_di_nascita.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -22,11 +23,14 @@ class UserProfileKeys {
   static const ultimoAccesso =
       'ultimo_accesso'; // aggiornato ad OGNI ingresso in app
 
-  // === 4 chiavi aggiuntive richieste ===
+  // === chiavi aggiuntive (app) ===
   static const status = 'status';
   static const likeTotali = 'like_totali';
   // static const affidabilita = 'affidabilita';
   static const idBloccati = 'id_bloccati'; // LISTA di UID
+
+  /// Nuova chiave richiesta
+  static const dataDiNascita = 'data_di_nascita'; // Timestamp o null
 }
 
 /// Schema + default per ogni chiave.
@@ -46,11 +50,12 @@ class UserProfileSchema {
     UserProfileKeys.ultimoAccesso: () =>
         FieldValue.serverTimestamp(), // toccato a ogni ingresso
 
-    // 4 aggiuntive
+    // aggiuntive
     UserProfileKeys.status: () => 'active',
     UserProfileKeys.likeTotali: () => 0,
     // UserProfileKeys.affidabilita: () => 0,
     UserProfileKeys.idBloccati: () => <String>[],
+    UserProfileKeys.dataDiNascita: () => null, // valorizzata dall’utente
   };
 
   /// Mappa iniziale alla PRIMA creazione del documento.
@@ -68,11 +73,12 @@ class UserProfileSchema {
       UserProfileKeys.dataRegistrazione: FieldValue.serverTimestamp(),
       UserProfileKeys.ultimoAccesso: FieldValue.serverTimestamp(),
 
-      // 4 aggiuntive
+      // aggiuntive
       UserProfileKeys.status: defaults[UserProfileKeys.status]!(),
       UserProfileKeys.likeTotali: defaults[UserProfileKeys.likeTotali]!(),
       // UserProfileKeys.affidabilita: defaults[UserProfileKeys.affidabilita]!(),
       UserProfileKeys.idBloccati: defaults[UserProfileKeys.idBloccati]!(),
+      UserProfileKeys.dataDiNascita: defaults[UserProfileKeys.dataDiNascita]!(),
     };
   }
 }
@@ -91,14 +97,12 @@ class UserProfile {
     final snap = await ref.get();
 
     if (!snap.exists) {
-      // Primo login: crea tutte le chiavi.
       await ref.set(
-          UserProfileSchema.initialFromFirebaseUser(user, provider: provider));
+        UserProfileSchema.initialFromFirebaseUser(user, provider: provider),
+      );
       return;
     }
 
-    // Documento già esistente: aggiorno SOLO i campi che provengono dal provider
-    // e tocco ultimo_accesso. NON tocco data_registrazione.
     await ref.set({
       UserProfileKeys.provider: provider,
       UserProfileKeys.email: user.email,
@@ -108,7 +112,6 @@ class UserProfile {
       UserProfileKeys.ultimoAccesso: FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    // Aggiungi eventuali chiavi mancanti + (opzionale) rimuovi chiavi extra sconosciute.
     await _reconcileSchema(
       ref,
       existing: (snap.data() ?? const <String, dynamic>{}),
@@ -133,6 +136,19 @@ class UserProfile {
 
   static Map<String, dynamic> unblockUsers(List<String> uids) {
     return {UserProfileKeys.idBloccati: FieldValue.arrayRemove(uids)};
+  }
+
+  /// Imposta la data di nascita (Timestamp) o la cancella se null.
+  /// Esegue una piccola validazione: non può essere nel futuro.
+  static Map<String, dynamic> setDataDiNascita(DateTime? dob) {
+    if (dob == null) {
+      return {UserProfileKeys.dataDiNascita: null};
+    }
+    final now = DateTime.now();
+    if (dob.isAfter(now)) {
+      throw ArgumentError('La data di nascita non può essere futura.');
+    }
+    return {UserProfileKeys.dataDiNascita: Timestamp.fromDate(dob)};
   }
 
   /// (Opzionale) Sincronizza schema on-demand per un UID specifico.
@@ -165,9 +181,8 @@ class UserProfile {
     for (final key in schemaKeys) {
       final exists = existing.containsKey(key) && existing[key] != null;
       if (!exists) {
-        // Non reinizializzare data_registrazione se il documento esiste già
         if (!documentJustCreated && key == UserProfileKeys.dataRegistrazione) {
-          continue;
+          continue; // non reinizializzare data_registrazione
         }
         toAdd[key] = UserProfileSchema.defaults[key]!();
       }

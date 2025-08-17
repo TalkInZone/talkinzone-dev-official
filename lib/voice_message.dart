@@ -1,38 +1,54 @@
-// voice_message.dart
+// =============================================================================
+// 📦 FILE: voice_message.dart
+// =============================================================================
+// Modello dati per un messaggio (vocale o testo) della bacheca.
+// - Supporta categorie (enum MessageCategory)
+// - Gestisce messaggi "custom" con nome categoria personalizzato
+// - Contiene info per riproduzione audio (localPath) e statistiche (views)
+// =============================================================================
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:myapp/category_utils.dart';
+import 'category_utils.dart'; // per MessageCategory
 
-/// Supporta sia VOCALI che TESTO
-enum MessageType { voice, text }
-
-/// Modello messaggio
 class VoiceMessage {
-  // Base
+  // 🔑 Identificatori e meta
   final String id;
   final DateTime timestamp;
+
+  // 📍 Posizione
   final double latitude;
   final double longitude;
 
-  // VOCE (per i testi restano valori neutri)
-  final Duration duration; // 0 per i messaggi testuali
-  final String storjObjectKey; // "" per i messaggi testuali
+  // ⏱️ Durata audio (0 per messaggi testuali)
+  final int duration;
 
-  // TESTO (per i vocali resta null)
-  final String? text;
-
-  // Meta
-  final MessageType type; // voice | text
+  // 🏷️ Categoria enum + (🆕) nome custom salvato su Firestore
   final MessageCategory category;
-  final String senderId;
-  final String name;
+  final String? customCategoryName; // es. "provolonebaby" se category == custom
 
-  // Local-only / stats
-  String? localPath; // solo per voice (download locale)
+  // ☁️ Storage remoto (vuoto per testo)
+  final String storjObjectKey;
+
+  // 👤 Mittente
+  final String senderId;
+  final String name; // nome mittente (denormalizzato per praticità UI)
+
+  // 👀 Statistiche
   int views;
   List<String> viewedBy;
 
-  bool get isVoice => type == MessageType.voice;
-  bool get isText => type == MessageType.text;
+  // 📝 Testo (null per messaggi vocali)
+  final String? text;
+
+  // 💾 Percorso locale file audio (download temporaneo)
+  String? localPath;
+
+  // 🔤 Tipo messaggio ('voice' | 'text')
+  final String type;
+
+  // 👀 Comodità
+  bool get isText => type == 'text';
+  bool get isVoice => !isText;
 
   VoiceMessage({
     required this.id,
@@ -41,107 +57,99 @@ class VoiceMessage {
     required this.longitude,
     required this.duration,
     required this.category,
+    this.customCategoryName,
     required this.storjObjectKey,
     required this.senderId,
-    required this.name,
     required this.views,
     required this.viewedBy,
-    required this.type,
-    this.text,
+    required this.name,
+    required this.text,
     this.localPath,
+    required this.type,
   });
 
-  /// Costruzione robusta da Firestore (retrocompat: default type=voice)
+  /// Factory: costruisce l'istanza a partire da un documento Firestore.
   factory VoiceMessage.fromFirestore(DocumentSnapshot doc) {
-    final data = (doc.data() as Map<String, dynamic>? ?? {});
+    final data =
+        doc.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
 
-    // timestamp può essere null finché serverTimestamp() non è risolto
-    final Timestamp? ts = data['timestamp'] as Timestamp?;
-    final DateTime tsDt = ts?.toDate() ?? DateTime.now();
+    // Timestamp
+    final DateTime ts = (data['timestamp'] is Timestamp)
+        ? (data['timestamp'] as Timestamp).toDate()
+        : DateTime.now();
 
-    // Cast numerici sicuri
-    final double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
-    final double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-    // Tipo: default "voice" per documenti vecchi
-    final String rawType = (data['type'] as String?) ?? 'voice';
-    final MessageType type =
-        rawType == 'text' ? MessageType.text : MessageType.voice;
-
-    final int durSec = (data['duration'] as num?)?.toInt() ?? 0;
-    final String key = (data['storjObjectKey'] as String?) ?? '';
-    final String? text = data['text'] as String?;
-
-    // Categoria sicura
-    final String catName = (data['category'] as String?) ?? 'free';
+    // Categoria (fallback: free)
+    final catRaw = (data['category'] as String? ?? 'free').toLowerCase();
     final MessageCategory cat = MessageCategory.values.firstWhere(
-      (e) => e.name == catName,
+      (e) => e.name.toLowerCase() == catRaw,
       orElse: () => MessageCategory.free,
     );
 
-    // Campi basic
-    final String sid = (data['senderId'] as String?) ?? 'unknown';
+    // Nome custom della categoria (se presente)
+    final String? customName = (data['customCategoryName'] as String?)?.trim();
 
-    // Statistiche
-    final int views = (data['views'] as num?)?.toInt() ?? 0;
-    final List<String> viewedBy =
-        List<String>.from((data['viewedBy'] as List?) ?? const []);
+    // Tipo messaggio (fallback: voice)
+    final String msgType =
+        (data['type'] as String?)?.toLowerCase() == 'text' ? 'text' : 'voice';
 
-    // Nome mittente salvato sul messaggio (fallback “Anonimo”)
-    final String name = ((data['name'] as String?)?.trim().isNotEmpty ?? false)
-        ? (data['name'] as String).trim()
-        : 'Anonimo';
+    // Vista/letture
+    final int v = (data['views'] as num?)?.toInt() ?? 0;
+    final List<String> vb = ((data['viewedBy'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList();
 
     return VoiceMessage(
       id: doc.id,
-      timestamp: tsDt,
-      latitude: lat,
-      longitude: lon,
-      duration:
-          type == MessageType.voice ? Duration(seconds: durSec) : Duration.zero,
+      timestamp: ts,
+      latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
+      duration: (data['duration'] as num?)?.toInt() ?? 0,
       category: cat,
-      storjObjectKey: type == MessageType.voice ? key : '',
-      senderId: sid,
-      name: name,
-      views: views,
-      viewedBy: viewedBy,
-      type: type,
-      text: type == MessageType.text ? (text ?? '') : null,
+      customCategoryName:
+          (customName != null && customName.isNotEmpty) ? customName : null,
+      storjObjectKey: (data['storjObjectKey'] as String?) ?? '',
+      senderId: (data['senderId'] as String?) ?? '',
+      views: v,
+      viewedBy: vb,
+      name: (data['name'] as String?)?.trim().isNotEmpty == true
+          ? (data['name'] as String)
+          : 'Anonimo',
+      text: (data['text'] as String?),
+      localPath: null,
+      type: msgType,
     );
   }
 
-  /// copyWith
+  get reactions => null;
+
+  /// copyWith minimale (usato dalla UI per aggiornare localPath senza ricreare tutto)
   VoiceMessage copyWith({
-    String? id,
-    DateTime? timestamp,
-    double? latitude,
-    double? longitude,
-    Duration? duration,
-    MessageCategory? category,
-    String? storjObjectKey,
-    String? senderId,
-    String? name,
     String? localPath,
     int? views,
     List<String>? viewedBy,
-    MessageType? type,
-    String? text,
   }) {
     return VoiceMessage(
-      id: id ?? this.id,
-      timestamp: timestamp ?? this.timestamp,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      duration: duration ?? this.duration,
-      category: category ?? this.category,
-      storjObjectKey: storjObjectKey ?? this.storjObjectKey,
-      senderId: senderId ?? this.senderId,
-      name: name ?? this.name,
-      localPath: localPath ?? this.localPath,
+      id: id,
+      timestamp: timestamp,
+      latitude: latitude,
+      longitude: longitude,
+      duration: duration,
+      category: category,
+      customCategoryName: customCategoryName,
+      storjObjectKey: storjObjectKey,
+      senderId: senderId,
       views: views ?? this.views,
-      viewedBy: viewedBy ?? this.viewedBy,
-      type: type ?? this.type,
-      text: text ?? this.text,
+      viewedBy: viewedBy ?? List<String>.from(this.viewedBy),
+      name: name,
+      text: text,
+      localPath: localPath ?? this.localPath,
+      type: type,
     );
+  }
+
+  @override
+  String toString() {
+    return 'VoiceMessage(id: $id, type: $type, category: ${category.name}, '
+        'custom: $customCategoryName, views: $views, text? ${text != null})';
   }
 }

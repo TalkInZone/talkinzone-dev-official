@@ -1,8 +1,16 @@
-// main.dart — completo
-// 🔧 Patch minima:
+// main.dart — completo (Material 3, no composer duplicato, listener ottimizzato)
+// 🔧 Patch già incluse:
 // - In backgroundNotificationHandler(): se type == 'text' non cancellare su Storj.
 // - In _cleanupOldMessages(): cancella su Storj solo se message.isVoice.
 // - In _runStartupCleanup(): se type == 'text' non cancellare su Storj.
+// ✅ Reazioni: toggle su campo Firestore `reactions.<emoji>` (array di uid).
+// ✅ Fix welcome: pannello profilo e barra input NON compaiono quando è visibile il welcome.
+// ✅ Material 3 + dark mode.
+// ✅ Rimosso composer overlay in basso (ora solo dentro HomeScreenUI).
+// 🆕 Age Gate: se `data_di_nascita` è null, mostra form obbligatorio all’avvio (età minima 16 anni).
+//    Testi/modifiche centralizzati in AgeGateConfig/AgeGateStrings. Avviso sospensione per dati falsi.
+// ✅ Categorie personalizzate: scrittura/lettura di `customCategoryName` su Firestore.
+// ✅ VISIBILITÀ: listener Firestore senza filtro WHERE su timestamp (vede subito i messaggi nuovi).
 
 import 'dart:async';
 import 'dart:io';
@@ -26,7 +34,7 @@ import 'update_required_screen.dart';
 import 'category_utils.dart';
 import 'home_screen_ui.dart';
 import 'voice_message.dart';
-import 'services/user_profile.dart'; // profilo
+import 'services/user_profile.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -237,7 +245,7 @@ Future<void> backgroundNotificationHandler() async {
     for (final doc in expiredMessages.docs) {
       try {
         final data = doc.data();
-        final String type = (data['type'] as String?) ?? 'voice'; // ✅ NEW
+        final String type = (data['type'] as String?) ?? 'voice';
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 
@@ -330,7 +338,14 @@ Future<void> backgroundNotificationHandler() async {
         );
 
         if (distance <= selectedRadius) {
-          final category = data['category'] as String? ?? 'free';
+          // 🆕 Categoria personalizzata: mostra il nome reale nelle notifiche
+          String category = data['category'] as String? ?? 'free';
+          if (category.toLowerCase() == 'custom' ||
+              category.toLowerCase() == 'special' ||
+              category.toLowerCase() == 'personalizzata') {
+            final cn = (data['customCategoryName'] as String?)?.trim();
+            if (cn != null && cn.isNotEmpty) category = cn;
+          }
           final String type = (data['type'] as String?) ?? 'voice';
           final bool isText = type == 'text';
 
@@ -377,45 +392,28 @@ class LoginScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 40),
-            ElevatedButton(
+
+            // Pulsante Google (Material 3)
+            FilledButton.icon(
               onPressed: () async {
-                debugPrint("👉 Bottone di accesso premuto");
+                debugPrint("👉 Bottone di accesso premuto (Google)");
                 final user = await authService.signInWithGoogle();
                 if (user == null) {
-                  debugPrint("❌ Accesso fallito");
+                  debugPrint("❌ Accesso Google fallito");
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Accesso fallito. Riprova.'),
-                      ),
+                          content: Text('Accesso fallito. Riprova.')),
                     );
                   }
                 } else {
-                  debugPrint("✅ Accesso riuscito, navigazione...");
+                  debugPrint("✅ Accesso Google riuscito, navigazione...");
                 }
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 30,
-                  vertical: 15,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset('assets/google_logo.png', width: 24, height: 24),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Accedi con Google',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ],
-              ),
+              icon:
+                  Image.asset('assets/google_logo.png', width: 20, height: 20),
+              label: const Text('Accedi con Google'),
+              style: FilledButton.styleFrom(minimumSize: const Size(280, 48)),
             ),
           ],
         ),
@@ -513,10 +511,18 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   // NEW: debounce locale per “testo visto”
   final Set<String> _textSeenOnce = {};
 
+  // 🔧 NEW: evita sync multiple dello schema profilo
+  bool _didSchemaSync = false;
+
+  // 🆕 Categoria personalizzata — stato utente (nome scelto in Settings)
+  String? _customCategoryName; // SharedPreferences: 'custom_category_name'
+  MessageCategory?
+      _customEnum; // valore enum per la categoria personalizzata (se presente)
+  final Map<String, String> _msgCustomNames = {}; // idMsg -> nome custom su doc
+
   @override
   void initState() {
     super.initState();
-    WidgetsFlutterBinding.ensureInitialized();
     WidgetsBinding.instance.addObserver(this);
 
     _textController.addListener(() {
@@ -568,11 +574,65 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       final isFirstLaunch = prefs.getBool('first_launch') ?? true;
       _showWelcomeMessage = isFirstLaunch;
       if (isFirstLaunch) prefs.setBool('first_launch', false);
+
+      // 🆕 Categoria personalizzata: carica nome scelto
+      final rawName = (prefs.getString('custom_category_name') ?? '').trim();
+      _customCategoryName = rawName.isEmpty ? null : rawName;
+
+      _customEnum = _findCustomEnum();
     });
+
+    // 🔧 NEW: sincronizza lo schema del profilo
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && uid.isNotEmpty && !_didSchemaSync) {
+        await UserProfile.syncSchemaWithDatabase(uid, pruneUnknownKeys: true);
+        _didSchemaSync = true;
+        debugPrint("✅ Schema profilo sincronizzato per UID: $uid");
+      }
+    } catch (e) {
+      debugPrint("❌ Sync schema fallita: $e");
+    }
 
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
       await _loadUserData();
     }
+  }
+
+  MessageCategory? _findCustomEnum() {
+    for (final c in MessageCategory.values) {
+      final n = c.name.toLowerCase();
+      if (n == 'custom' || n == 'special' || n == 'personalizzata') {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  bool _isCustomCategoryEnum(MessageCategory c) =>
+      _customEnum != null && c.name == _customEnum!.name;
+
+  bool _matchesMyCustomName(VoiceMessage m) {
+    if (_customEnum == null) return true;
+    if (m.category.name != _customEnum!.name) return true;
+    final myName = (_customCategoryName ?? '').trim();
+    if (myName.isEmpty) return false;
+    final msgName =
+        (_msgCustomNames[m.id] ?? m.customCategoryName ?? '').trim();
+    return msgName.isNotEmpty && msgName.toLowerCase() == myName.toLowerCase();
+  }
+
+  bool _requireCustomNameOrWarn() {
+    if (_customEnum == null) return true;
+    if (_selectedCategory.name != _customEnum!.name) return true;
+    if ((_customCategoryName ?? '').trim().isNotEmpty) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Imposta il nome della categoria personalizzata nelle Impostazioni.'),
+      ),
+    );
+    return false;
   }
 
   Future<void> _loadUserData() async {
@@ -651,9 +711,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   void _initializeFirestoreListener() {
+    // 🔧 FIX VISIBILITÀ:
+    // RIMOSSO il WHERE sul timestamp (i documenti con serverTimestamp() null non passavano il filtro).
+    // Manteniamo solo l'ORDER BY + LIMIT; l'expiry (5 min) viene gestito in locale.
     _messagesSubscription = _firestoreMessages
         .orderBy('timestamp', descending: true)
-        .snapshots(includeMetadataChanges: true)
+        .limit(200)
+        .snapshots()
         .listen(
       (snapshot) {
         _processFirestoreSnapshot(snapshot);
@@ -733,6 +797,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         final newMessage = VoiceMessage.fromFirestore(doc);
         final isExpired = now.difference(newMessage.timestamp).inMinutes >= 5;
 
+        // 🆕 salva il nome custom della categoria per filtri locali
+        try {
+          final data = doc.data() as Map<String, dynamic>? ?? {};
+          final cn = (data['customCategoryName'] as String?)?.trim();
+          if (cn != null && cn.isNotEmpty) _msgCustomNames[doc.id] = cn;
+        } catch (_) {}
+
         if (isExpired) {
           removedMessages.add(newMessage.id);
         } else {
@@ -748,6 +819,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             if (_notificationSoundEnabled &&
                 _isMessageInRange(newMessage) &&
                 _activeFilters.contains(newMessage.category) &&
+                _matchesMyCustomName(newMessage) &&
                 newMessage.senderId != _currentUserId) {
               SystemSound.play(SystemSoundType.alert);
             }
@@ -761,6 +833,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     if (!_isDisposed) {
       setState(() {
         _messages.removeWhere((msg) => removedMessages.contains(msg.id));
+        for (final mid in removedMessages) {
+          _msgCustomNames.remove(mid);
+        }
 
         for (final updated in updatedMessages) {
           final index = _messages.indexWhere((m) => m.id == updated.id);
@@ -947,6 +1022,28 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     if (!_isRecording || _recorder == null) return;
 
     try {
+      // 🆕 Se selezionata "custom" ma non impostato il nome, blocca invio
+      if (!_requireCustomNameOrWarn()) {
+        _recordingTimer?.cancel();
+        await _recorder!.stopRecorder();
+        await _resetRecorder();
+        if (_currentRecordingPath != null) {
+          try {
+            await File(_currentRecordingPath!).delete();
+          } catch (_) {}
+        }
+        if (mounted) {
+          setState(() {
+            _isRecording = false;
+            _recordingSeconds = 0;
+            _currentRecordingPath = null;
+            _isLongPressRecording = false;
+            _isWaitingForRelease = false;
+          });
+        }
+        return;
+      }
+
       _recordingTimer?.cancel();
       await _recorder!.stopRecorder();
       await _resetRecorder();
@@ -961,20 +1058,25 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           final String senderName = await _resolveCurrentUserDisplayName();
           final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
 
-          await _firestoreMessages.add({
+          final Map<String, dynamic> payload = {
             'type': 'voice',
             'timestamp': FieldValue.serverTimestamp(),
             'latitude': _currentPosition!.latitude,
             'longitude': _currentPosition!.longitude,
             'duration': _recordingSeconds,
-            'category': _selectedCategory.name,
+            'category': _isCustomCategoryEnum(_selectedCategory)
+                ? (_customEnum!.name)
+                : _selectedCategory.name,
+            if (_isCustomCategoryEnum(_selectedCategory))
+              'customCategoryName': (_customCategoryName ?? '').trim(),
             'storjObjectKey': objectKey,
             'senderId': currentUid ?? (_currentUserId ?? ''),
             'views': 0,
             'viewedBy': <String>[],
             'name': senderName,
             'text': null,
-          });
+          };
+          await _firestoreMessages.add(payload);
         } catch (e) {
           debugPrint('❌ Errore salvataggio messaggio: $e');
           try {
@@ -1007,6 +1109,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     final raw = _textController.text.trim();
     if (raw.isEmpty) return;
 
+    // 🆕 Blocca invio se custom senza nome impostato
+    if (!_requireCustomNameOrWarn()) return;
+
     if (raw.characters.length > 250) {
       _textController.text = raw.characters.take(250).toString();
     }
@@ -1021,20 +1126,26 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       final String senderName = await _resolveCurrentUserDisplayName();
       final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
 
-      await _firestoreMessages.add({
+      final Map<String, dynamic> payload = {
         'type': 'text',
         'timestamp': FieldValue.serverTimestamp(),
         'latitude': _currentPosition?.latitude ?? 0.0,
         'longitude': _currentPosition?.longitude ?? 0.0,
         'duration': 0,
-        'category': _selectedCategory.name,
+        'category': _isCustomCategoryEnum(_selectedCategory)
+            ? (_customEnum!.name)
+            : _selectedCategory.name,
+        if (_isCustomCategoryEnum(_selectedCategory))
+          'customCategoryName': (_customCategoryName ?? '').trim(),
         'storjObjectKey': '',
         'senderId': currentUid ?? (_currentUserId ?? ''),
         'views': 0,
         'viewedBy': <String>[],
         'name': senderName,
         'text': _textController.text.trim(),
-      });
+      };
+
+      await _firestoreMessages.add(payload);
 
       _textController.clear();
     } catch (e) {
@@ -1051,6 +1162,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       if (expired) return false;
       if (!_isMessageInRange(m)) return false;
       if (!_activeFilters.contains(m.category)) return false;
+      if (!_matchesMyCustomName(m)) return false;
       return true;
     }).toList();
 
@@ -1090,7 +1202,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         : _currentUserId;
     if (myUid == null || myUid.isEmpty) return;
 
-    // ✅ Testo: niente azioni qui (il visto avviene su visibilità viewport)
     if (message.isText) return;
 
     final bool alreadyViewed = message.viewedBy.contains(myUid);
@@ -1220,7 +1331,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // NEW: marca "letto" per MESSAGGI TESTUALI quando la bolla è visibile (callback da UI)
+  // NEW: marca "letto" per TESTO quando la bolla è visibile
   Future<void> _markTextMessageViewed(VoiceMessage message) async {
     if (!message.isText) return;
 
@@ -1263,8 +1374,46 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         });
       }
     } catch (e) {
-      debugPrint('❌ Errore aggiornamento visualizzazioni testo (viewport): $e');
+      debugPrint('❌ Errore aggiornamento visualizzazioni testo: $e');
       _textSeenOnce.remove(message.id);
+    }
+  }
+
+  // ✅ Reazioni: toggle su Firestore
+  Future<void> _toggleReaction(VoiceMessage message, String emoji) async {
+    final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final String? myUid = (currentUid != null && currentUid.isNotEmpty)
+        ? currentUid
+        : _currentUserId;
+
+    if (myUid == null || myUid.isEmpty) return;
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((txn) async {
+        final docRef = _firestoreMessages.doc(message.id);
+        final snap = await txn.get(docRef);
+        if (!snap.exists) return;
+
+        final data = (snap.data() as Map<String, dynamic>? ?? {});
+        final Map<String, dynamic> rxRaw =
+            (data['reactions'] as Map<String, dynamic>?) ?? {};
+        final List<dynamic> usersDyn =
+            (rxRaw[emoji] as List<dynamic>?) ?? const [];
+        final Set<String> users = usersDyn.map((e) => e.toString()).toSet();
+
+        if (users.contains(myUid)) {
+          txn.update(docRef, {
+            'reactions.$emoji': FieldValue.arrayRemove([myUid])
+          });
+        } else {
+          txn.update(docRef, {
+            'reactions.$emoji': FieldValue.arrayUnion([myUid])
+          });
+        }
+      });
+      // 🔄 UI si aggiorna via listener
+    } catch (e) {
+      debugPrint('❌ Errore toggle reazione: $e');
     }
   }
 
@@ -1274,7 +1423,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     final filteredMessages = _messages.where((message) {
       return !(now.difference(message.timestamp).inMinutes >= 5) &&
           _isMessageInRange(message) &&
-          _activeFilters.contains(message.category);
+          _activeFilters.contains(message.category) &&
+          _matchesMyCustomName(message);
     }).toList();
 
     final canSend = _textController.text.trim().isNotEmpty &&
@@ -1302,6 +1452,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             isWaitingForRelease: _isWaitingForRelease,
             playingMessageId: _playingMessageId,
             radiusOptions: _radiusOptions,
+
+            // Stato invio testo
+            isSendingText: _isSendingText,
+
             onPlayMessage: _playMessage,
             onToggleRadiusSelector: () => setState(() {
               _showRadiusSelector = !_showRadiusSelector;
@@ -1325,6 +1479,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               }
             }),
             onCategorySelected: (category) => setState(() {
+              if (_isCustomCategoryEnum(category) &&
+                  ((_customCategoryName ?? '').trim().isEmpty)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                        'Seleziona un nome per la categoria personalizzata nelle Impostazioni.'),
+                  ),
+                );
+              }
               _selectedCategory = category;
               _showCategorySelector = false;
             }),
@@ -1335,7 +1498,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 _showRadiusSelector = false;
               }
             }),
-            onSettingsPressed: () => Navigator.pushNamed(context, '/settings'),
+            onSettingsPressed: () async {
+              await Navigator.pushNamed(context, '/settings');
+              await _loadSettings();
+              setState(() {});
+            },
             onProfilePressed: _refreshAndToggleUserInfo,
             onPressStart: _handlePressStart,
             onPressEnd: _handlePressEnd,
@@ -1363,10 +1530,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
             // Visibilità testo (per conteggio "visto")
             onTextVisible: (m) => _markTextMessageViewed(m),
+
+            // Reazioni
+            onToggleReaction: (m, emoji) => _toggleReaction(m, emoji),
           ),
 
-          // Pannellino profilo (come prima)
-          if (_showUserInfo && _currentUserData != null)
+          // Pannello profilo (non se c'è il welcome)
+          if (!_showWelcomeMessage && _showUserInfo && _currentUserData != null)
             Positioned(
               top: 60,
               right: 10,
@@ -1374,14 +1544,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.20),
+                      // ignore: deprecated_member_use
+                      color: Colors.black.withOpacity(0.20),
                       blurRadius: 10,
                       spreadRadius: 2,
                     )
                   ],
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 width: 250,
                 child: Column(
@@ -1478,8 +1649,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                           Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const AuthWrapper(),
-                            ),
+                                builder: (context) => const AuthWrapper()),
                           );
                         }
                       },
@@ -1495,118 +1665,252 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
 
-          // Barra input testo (overlay in basso)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, -2),
+// ============================================================================
+// 🔒 Age Gate (Data di nascita obbligatoria, minimo 16 anni)
+// ============================================================================
+class AgeGateConfig {
+  static const int minAgeYears = 16;
+}
+
+class AgeGateErrors {
+  const AgeGateErrors();
+
+  final String missingDate = 'Seleziona una data di nascita.';
+  String tooYoung(int years) =>
+      'Per usare l’app devi avere almeno $years anni.';
+  final String mustAccept =
+      'Devi confermare che i dati forniti sono veritieri.';
+  final String generic = 'Si è verificato un errore. Riprova.';
+}
+
+class AgeGateStrings {
+  static const String title = 'Completa il profilo';
+  static String subtitle() =>
+      'Per continuare ad usare TalkInZone devi indicare la tua data di nascita '
+      '(età minima: ${AgeGateConfig.minAgeYears} anni).';
+  static const String dateLabel = 'Data di nascita';
+  static const String datePlaceholder = 'Seleziona una data';
+  static const String datePickerHelp = 'Seleziona la tua data di nascita';
+  static const String declaration =
+      'Dichiaro che i dati forniti sono veritieri.';
+  static const String falseWarning =
+      'Attenzione: dichiarazioni false possono comportare la sospensione dell’account.';
+  static const String cta = 'Conferma e continua';
+  static const String logout = 'Esci';
+
+  static AgeGateErrors get errors => const AgeGateErrors();
+}
+
+class AgeGateWrapper extends StatelessWidget {
+  final Widget child;
+  const AgeGateWrapper({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return child;
+    }
+
+    final ref = FirebaseFirestore.instance.collection('utenti').doc(uid);
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: ref.snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final data = snap.data?.data() ?? const <String, dynamic>{};
+        final ts = data[UserProfileKeys.dataDiNascita] as Timestamp?;
+
+        if (ts == null) {
+          return const DateOfBirthScreen();
+        }
+
+        return child;
+      },
+    );
+  }
+}
+
+class DateOfBirthScreen extends StatefulWidget {
+  const DateOfBirthScreen({super.key});
+
+  @override
+  State<DateOfBirthScreen> createState() => _DateOfBirthScreenState();
+}
+
+class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
+  DateTime? _dob;
+  bool _accepted = false;
+  bool _saving = false;
+  String? _error;
+
+  DateTime get _cutoff {
+    final now = DateTime.now();
+    return DateTime(now.year - AgeGateConfig.minAgeYears, now.month, now.day);
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final initial = DateTime(now.year - 18, now.month, now.day);
+    final firstDate = DateTime(1900);
+    final lastDate = _cutoff;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isBefore(lastDate) ? initial : lastDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      helpText: AgeGateStrings.datePickerHelp,
+    );
+    if (picked != null) {
+      setState(() => _dob = picked);
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _error = null);
+
+    if (_dob == null) {
+      setState(() => _error = AgeGateStrings.errors.missingDate);
+      return;
+    }
+    if (_dob!.isAfter(_cutoff)) {
+      setState(() =>
+          _error = AgeGateStrings.errors.tooYoung(AgeGateConfig.minAgeYears));
+      return;
+    }
+    if (!_accepted) {
+      setState(() => _error = AgeGateStrings.errors.mustAccept);
+      return;
+    }
+
+    try {
+      setState(() => _saving = true);
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        throw Exception('Utente non autenticato');
+      }
+
+      await FirebaseFirestore.instance.collection('utenti').doc(uid).set(
+            UserProfile.setDataDiNascita(_dob!),
+            SetOptions(merge: true),
+          );
+    } catch (e) {
+      setState(() => _error = AgeGateStrings.errors.generic);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String _formatDob(DateTime? d) {
+    if (d == null) return AgeGateStrings.datePlaceholder;
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.cake_outlined, size: 64),
+                  const SizedBox(height: 12),
+                  const Text(
+                    AgeGateStrings.title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    AgeGateStrings.subtitle(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(AgeGateStrings.dateLabel),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    readOnly: true,
+                    onTap: _pickDate,
+                    decoration: InputDecoration(
+                      hintText: _formatDob(_dob),
+                      suffixIcon: const Icon(Icons.calendar_today_outlined),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Checkbox(
+                        value: _accepted,
+                        onChanged: (v) =>
+                            setState(() => _accepted = v ?? false),
+                      ),
+                      const Expanded(child: Text(AgeGateStrings.declaration)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    AgeGateStrings.falseWarning,
+                    style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _error!,
+                      style: const TextStyle(color: Colors.red),
                     ),
                   ],
-                ),
-                child: Row(
-                  children: [
-                    // Chip categoria (tap per cambiare)
-                    InkWell(
-                      onTap: () {
-                        setState(() {
-                          _showCategorySelector = !_showCategorySelector;
-                          if (_showCategorySelector) {
-                            _showFilterSelector = false;
-                            _showRadiusSelector = false;
-                          }
-                        });
-                      },
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: _selectedCategory.color.withAlpha(25),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: _selectedCategory.color),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(_selectedCategory.icon,
-                                size: 16, color: _selectedCategory.color),
-                            const SizedBox(width: 6),
-                            Text(
-                              _selectedCategory.label,
-                              style: TextStyle(color: _selectedCategory.color),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Campo testo
-                    Expanded(
-                      child: TextField(
-                        controller: _textController,
-                        maxLines: 3,
-                        minLines: 1,
-                        maxLength: 250,
-                        decoration: const InputDecoration(
-                          hintText: 'Scrivi un messaggio (max 250)',
-                          counterText: '',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                        ),
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) {
-                          final txt = _textController.text.trim();
-                          if (txt.isNotEmpty &&
-                              txt.characters.length <= 250 &&
-                              !_isSendingText) {
-                            _sendTextMessage();
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Bottone invio
-                    SizedBox(
-                      height: 40,
-                      width: 48,
-                      child: ElevatedButton(
-                        onPressed: (_textController.text.trim().isNotEmpty &&
-                                _textController.text.characters.length <= 250 &&
-                                !_isSendingText)
-                            ? () => _sendTextMessage()
-                            : null,
-                        style: ElevatedButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          shape: const CircleBorder(),
-                        ),
-                        child: _isSendingText
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send),
-                      ),
-                    ),
-                  ],
-                ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(AgeGateStrings.cta),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () async {
+                      await AuthService().signOut();
+                      if (context.mounted) {
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const AuthWrapper()),
+                          (_) => false,
+                        );
+                      }
+                    },
+                    child: const Text(AgeGateStrings.logout),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1620,10 +1924,22 @@ class VoiceChatApp extends StatelessWidget {
     return MaterialApp(
       title: 'TalkInZone',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const VoiceChatHome(),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blue,
+          brightness: Brightness.dark,
+        ),
+      ),
+      themeMode: ThemeMode.system,
+
+      // 🔒 MOSTRA la Home SOLO se data_di_nascita è valorizzata.
+      home: const AgeGateWrapper(child: VoiceChatHome()),
+
       routes: {'/settings': (context) => const SettingsScreen()},
     );
   }
@@ -1686,7 +2002,7 @@ Future<void> _runStartupCleanup() async {
     for (final doc in expiredMessages.docs) {
       try {
         final data = doc.data();
-        final String type = (data['type'] as String?) ?? 'voice'; // ✅ NEW
+        final String type = (data['type'] as String?) ?? 'voice';
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 

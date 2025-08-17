@@ -30,9 +30,9 @@ class StorjService {
   static const String endpoint =
       'gateway.storjshare.io'; // 🌐 Endpoint del gateway Storj
   static const String accessKey =
-      'jxd2jggpnkye4wfsb6lalf4b6cia'; // 🔑 Chiave di accesso
+      'jwxiqo7zg4ihf3i2mwoi5zgks47q'; // 🔑 Chiave di accesso
   static const String secretKey =
-      'jzh5ytpjdnh5p3divr2qrhc3qsbf4lj32z7wojrwa4uoh75yar6yk'; // 🗝️ Chiave segreta
+      'jzkop4pthgbc5kjaf7of5zxaumqsrlwvxmamsnbfc7ybdreyc7pdu'; // 🗝️ Chiave segreta
   static const String bucketName =
       'voice-chat-audios'; // 📦 Nome del bucket predefinito
 
@@ -40,7 +40,7 @@ class StorjService {
   // 💾 STATO INTERNO DEL SERVIZIO
   // ====================================================================================
   Minio?
-  _minio; // 🧩 Istanza del client Minio (inizializzata solo dopo chiamata a initialize())
+      _minio; // 🧩 Istanza del client Minio (inizializzata solo dopo chiamata a initialize())
   final Map<String, String> _audioCache =
       {}; // 💿 Cache locale: objectKey -> percorso file locale
   bool _isInitialized =
