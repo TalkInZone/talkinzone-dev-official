@@ -7,7 +7,7 @@
 // =============================================================================
 
 import 'dart:math' as math;
-import 'dart:async'; // 🔴 MODIFICA: StreamSubscription per listeners reazioni
+import 'dart:async'; // 🔴 MODIFICA: StreamSubscription per listener doc messaggi
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -202,18 +202,18 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   final Set<String> _textVisibilityNotified = {};
   OverlayEntry? _reactionsOverlay;
 
-  // 🔴 MODIFICA: stato reazioni
+  // 🔴 MODIFICA: stato reazioni (solo documento "messages/{id}")
   final Map<String, Map<String, int>> _localReactions = {}; // ottimistico
   final Map<String, Map<String, int>> _remoteDocReactions =
-      {}; // da messages.reactions
-  final Map<String, Map<String, int>> _remoteEventReactions =
-      {}; // da subcollection
+      {}; // messages.reactions (emoji->count)
+  final Map<String, String> _myReactionFromDoc =
+      {}; // messages.reactionsByUser[uid] -> emoji
+  final Map<String, String> _myReactionLocal =
+      {}; // ottimistico (uid->emoji per quel messaggio)
 
-  // 🔴 MODIFICA: subscriptions per doc + subcollection
+  // 🔴 MODIFICA: listener SOLO sul documento del messaggio
   final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
       _docSubs = {};
-  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
-      _eventSubs = {};
 
   @override
   void initState() {
@@ -231,19 +231,15 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
   @override
   void dispose() {
-    // 🔴 MODIFICA: chiusura listeners
     for (final s in _docSubs.values) {
       s.cancel();
     }
-    for (final s in _eventSubs.values) {
-      s.cancel();
-    }
     _docSubs.clear();
-    _eventSubs.clear();
     super.dispose();
   }
 
-  // 🔴 MODIFICA: attach listeners a doc.reactions e a /reactions_events
+  // 🔴 MODIFICA: attach listeners SOLO a messages/{id} per leggere
+  //              reactions (emoji->count) e reactionsByUser (uid->emoji)
   void _refreshReactionSubscriptions() {
     final ids = widget.filteredMessages.map((m) => m.id).toSet();
 
@@ -253,13 +249,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         _docSubs[id]?.cancel();
         _docSubs.remove(id);
         _remoteDocReactions.remove(id);
-      }
-    }
-    for (final id in _eventSubs.keys.toList()) {
-      if (!ids.contains(id)) {
-        _eventSubs[id]?.cancel();
-        _eventSubs.remove(id);
-        _remoteEventReactions.remove(id);
+        _myReactionFromDoc.remove(id);
       }
     }
 
@@ -267,71 +257,55 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     for (final m in widget.filteredMessages) {
       final docRef =
           FirebaseFirestore.instance.collection('messages').doc(m.id);
+
       if (!_docSubs.containsKey(m.id)) {
         _docSubs[m.id] = docRef.snapshots().listen((snap) {
           final data = snap.data();
           if (data == null) return;
+
+          // counts
           final Map<String, int> counts =
               Map<String, int>.from(data['reactions'] ?? {});
-          final prev = _remoteDocReactions[m.id];
-          if (prev == null || !_mapEquals(prev, counts)) {
-            setState(() {
+          final prevCounts = _remoteDocReactions[m.id];
+
+          // my emoji (da reactionsByUser)
+          final uid = widget.currentUserId ?? '';
+          final Map<String, dynamic> byUserDyn =
+              Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
+          final String? myEmoji =
+              byUserDyn[uid] is String ? byUserDyn[uid] as String : null;
+
+          setState(() {
+            if (prevCounts == null || !_mapEquals(prevCounts, counts)) {
               _remoteDocReactions[m.id] = counts;
-            });
-            _reconcileLocalIfCovered(
-                m.id); // 🔴 MODIFICA: riconcilia locale→remoto
-          }
-        });
-      }
-      if (!_eventSubs.containsKey(m.id)) {
-        final evRef = docRef.collection('reactions_events');
-        _eventSubs[m.id] = evRef.snapshots().listen((qs) {
-          final Map<String, int> acc = {};
-          for (final d in qs.docs) {
-            final data = d.data();
-            final e = (data['emoji'] ?? '') as String;
-            if (e.isEmpty) continue;
-            acc[e] = (acc[e] ?? 0) + 1;
-          }
-          final prev = _remoteEventReactions[m.id];
-          if (prev == null || !_mapEquals(prev, acc)) {
-            setState(() {
-              _remoteEventReactions[m.id] = acc;
-            });
-            _reconcileLocalIfCovered(m.id); // 🔴 MODIFICA
-          }
+            }
+            if (myEmoji != null) {
+              _myReactionFromDoc[m.id] = myEmoji;
+            } else {
+              _myReactionFromDoc.remove(m.id);
+            }
+          });
+
+          _reconcileLocalIfCovered(m.id);
         });
       }
     }
   }
 
-  // 🔴 MODIFICA: somma sicura tra mappe conteggi
-  Map<String, int> _sumCounts(Map<String, int> a, Map<String, int> b) {
-    final out = <String, int>{}..addAll(a);
-    b.forEach((k, v) => out[k] = (out[k] ?? 0) + v);
-    return out;
-  }
-
-  // 🔴 MODIFICA: se il remoto copre (>=) il locale, rimuovo override locale
   void _reconcileLocalIfCovered(String id) {
     final local = _localReactions[id];
     if (local == null) return;
-    final remote = _combinedRemoteCountsForMessage(id);
+    final remote = _remoteDocReactions[id] ?? const <String, int>{};
     if (_covers(remote, local)) {
-      setState(() {
-        _localReactions.remove(id);
-      });
+      setState(() => _localReactions.remove(id));
+    }
+    // anche per la mia emoji locale:
+    if (_myReactionLocal.containsKey(id) &&
+        _myReactionFromDoc.containsKey(id)) {
+      setState(() => _myReactionLocal.remove(id));
     }
   }
 
-  // 🔴 MODIFICA: somma doc+event per confronto e UI
-  Map<String, int> _combinedRemoteCountsForMessage(String id) {
-    final a = _remoteDocReactions[id] ?? const <String, int>{};
-    final b = _remoteEventReactions[id] ?? const <String, int>{};
-    return _sumCounts(a, b);
-  }
-
-  // 🔴 MODIFICA: check superset (remote >= local per ogni emoji)
   bool _covers(Map<String, int> remote, Map<String, int> local) {
     for (final e in local.entries) {
       if ((remote[e.key] ?? 0) < e.value) return false;
@@ -365,7 +339,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return '${(meters / 1000).toStringAsFixed(1)} km';
   }
 
-  // Bucket qualitativi (solo ricevuti)
+  // Bucket qualitativi per messaggi ricevuti
   String _formatDistanceBucket(double meters) {
     if (meters <= 500) return 'molto vicino';
     if (meters > 500 && meters <= 1000) return 'vicino';
@@ -399,48 +373,193 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     _reactionsOverlay = null;
   }
 
-  // 🔴 MODIFICA: persistenza reazione con fallback più robusto
-  Future<void> _persistReaction(VoiceMessage message, String emoji) async {
+  // 🔴 MODIFICA: persistenza reazione TUTTO NEL DOCUMENTO "messages/{id}"
+  // - Aggiorna atomicamente:
+  //   reactions: Map<emoji,int>
+  //   reactionsByUser: Map<uid,emoji>
+  //   Ritorna true/false per gestire rollback in UI
+  Future<bool> _persistReaction(VoiceMessage message, String newEmoji) async {
+    final uid = widget.currentUserId;
+    if (uid == null) return false;
     final docRef =
         FirebaseFirestore.instance.collection('messages').doc(message.id);
+
     try {
-      await docRef.set({
-        'reactions.$emoji': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } on FirebaseException {
-      // 🔴 MODIFICA: fallback su subcollection per QUALSIASI errore Firestore
-      try {
-        await docRef.collection('reactions_events').add({
-          'emoji': emoji,
-          'createdAt': FieldValue.serverTimestamp(),
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) return;
+
+        final data = snap.data() as Map<String, dynamic>;
+        final Map<String, dynamic> rawCounts =
+            Map<String, dynamic>.from(data['reactions'] ?? {});
+        final Map<String, int> counts = rawCounts
+            .map((k, v) => MapEntry(k, (v is int) ? v : (v as num).toInt()));
+
+        final Map<String, dynamic> rawByUser =
+            Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
+        final Map<String, String> byUser = {};
+        rawByUser.forEach((k, v) {
+          if (v is String) byUser[k] = v;
         });
-      } on FirebaseException {
-        // Se fallisce anche qui, lascio lo stato locale finché non si riesce
-        // (così non "sparisce" dalla UI).
-      }
+
+        final prevEmoji = byUser[uid];
+        if (prevEmoji == newEmoji) return; // nulla da fare
+
+        // decremento vecchia (se c'era)
+        if (prevEmoji != null) {
+          final oldVal = (counts[prevEmoji] ?? 0) - 1;
+          if (oldVal > 0) {
+            counts[prevEmoji] = oldVal;
+          } else {
+            counts.remove(prevEmoji);
+          }
+        }
+
+        // incremento nuova
+        counts[newEmoji] = (counts[newEmoji] ?? 0) + 1;
+
+        // aggiorno mappa utente->emoji
+        byUser[uid] = newEmoji;
+
+        tx.update(docRef, {
+          'reactions': counts,
+          'reactionsByUser': byUser,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 
-  // 🔴 MODIFICA: locale incrementale e niente più rimozione in whenComplete
-  void _applyLocalReaction(VoiceMessage message, String emoji) {
+  // 🔴 MODIFICA (TOGGLE OFF): persistenza rimozione reazione nel doc messages/{id}
+  //   Ritorna true/false per gestire rollback in UI
+  Future<bool> _persistReactionRemoval(VoiceMessage message) async {
+    final uid = widget.currentUserId;
+    if (uid == null) return false;
+
+    final docRef =
+        FirebaseFirestore.instance.collection('messages').doc(message.id);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) return;
+
+        final data = snap.data() as Map<String, dynamic>;
+
+        final Map<String, dynamic> rawCounts =
+            Map<String, dynamic>.from(data['reactions'] ?? {});
+        final Map<String, int> counts = rawCounts
+            .map((k, v) => MapEntry(k, (v is int) ? v : (v as num).toInt()));
+
+        final Map<String, dynamic> rawByUser =
+            Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
+        final Map<String, String> byUser = {};
+        rawByUser.forEach((k, v) {
+          if (v is String) byUser[k] = v;
+        });
+
+        final prevEmoji = byUser[uid];
+        if (prevEmoji == null) return; // niente da rimuovere
+
+        final newVal = (counts[prevEmoji] ?? 0) - 1;
+        if (newVal > 0) {
+          counts[prevEmoji] = newVal;
+        } else {
+          counts.remove(prevEmoji);
+        }
+        byUser.remove(uid);
+
+        tx.update(docRef, {
+          'reactions': counts,
+          'reactionsByUser': byUser,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 🔴 MODIFICA: applicazione locale (ottimistico) con vincolo 1 reazione/utente
+  //              + rollback se write fallisce
+  Future<void> _applyLocalReaction(VoiceMessage message, String emoji) async {
+    final prevEmoji =
+        _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+
+    // stato ottimistico
+    Map<String, int>? before;
     setState(() {
       final base = Map<String, int>.from(
         _localReactions[message.id] ??
-            _combinedRemoteCountsForMessage(message.id),
+            _remoteDocReactions[message.id] ??
+            (message.reactions ?? const <String, int>{}),
       );
-      base[emoji] = (base[emoji] ?? 0) + 1;
+      before = Map<String, int>.from(base);
+
+      if (prevEmoji == null) {
+        base[emoji] = (base[emoji] ?? 0) + 1;
+      } else if (prevEmoji != emoji) {
+        final old = (base[prevEmoji] ?? 0) - 1;
+        if (old > 0) {
+          base[prevEmoji] = old;
+        } else {
+          base.remove(prevEmoji);
+        }
+        base[emoji] = (base[emoji] ?? 0) + 1;
+      }
       _localReactions[message.id] = base;
+      _myReactionLocal[message.id] = emoji;
     });
 
-    _persistReaction(message, emoji).whenComplete(() {
-      // 🔴 MODIFICA: NIENTE rimozione qui.
-      // Verrà rimossa SOLO quando il remoto coprirà i valori locali
-      // (_reconcileLocalIfCovered) in seguito agli snapshot.
+    final ok = await _persistReaction(message, emoji);
+    if (!ok) {
+      // 🔴 rollback se fallisce (permessi/rete)
+      setState(() {
+        if (before != null) _localReactions[message.id] = before!;
+        _myReactionLocal.remove(message.id);
+      });
+    } else {
+      widget.onToggleReaction(message, emoji); // callback esistente
+    }
+  }
+
+  // 🔴 MODIFICA (TOGGLE OFF): rimozione locale + rollback se write fallisce
+  Future<void> _applyLocalReactionRemoval(VoiceMessage message) async {
+    final prev = _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+    if (prev == null) return;
+
+    Map<String, int>? before;
+    setState(() {
+      final base = Map<String, int>.from(
+        _localReactions[message.id] ??
+            _remoteDocReactions[message.id] ??
+            (message.reactions ?? const <String, int>{}),
+      );
+      before = Map<String, int>.from(base);
+
+      final nv = (base[prev] ?? 0) - 1;
+      if (nv > 0) {
+        base[prev] = nv;
+      } else {
+        base.remove(prev);
+      }
+
+      _localReactions[message.id] = base;
+      _myReactionLocal.remove(message.id);
     });
 
-    // Mantengo il tuo callback (se usato altrove)
-    widget.onToggleReaction(message, emoji);
+    final ok = await _persistReactionRemoval(message);
+    if (!ok) {
+      // 🔴 rollback se fallisce
+      setState(() {
+        if (before != null) _localReactions[message.id] = before!;
+        _myReactionLocal[message.id] = prev;
+      });
+    }
   }
 
   void _showReactionsOverlay({
@@ -463,6 +582,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
     _reactionsOverlay = OverlayEntry(
       builder: (_) {
+        final current =
+            _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
         return Stack(
           children: [
             Positioned.fill(
@@ -494,17 +615,29 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: emojis.map((e) {
+                      final selected =
+                          current == e; // 🔴 MODIFICA: evidenzia emoji attuale
                       return InkWell(
                         borderRadius: BorderRadius.circular(16),
-                        onTap: () {
+                        onTap: () async {
                           HapticFeedback.selectionClick();
-                          _applyLocalReaction(message, e); // 🔴 MODIFICA
+                          // 🔴 MODIFICA: toggle off (stessa emoji) o switch
+                          if (selected) {
+                            await _applyLocalReactionRemoval(message);
+                            _hideReactionsOverlay();
+                            return;
+                          }
+                          await _applyLocalReaction(message, e);
                           _hideReactionsOverlay();
                         },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 4),
-                          child: Text(e, style: const TextStyle(fontSize: 24)),
+                          child: Opacity(
+                            opacity: selected ? 0.55 : 1,
+                            child:
+                                Text(e, style: const TextStyle(fontSize: 24)),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -599,13 +732,13 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       pal: pal,
                       showReactionsOverlay: _showReactionsOverlay,
 
-                      // 🔴 MODIFICA: locale > (doc + eventi) > modello
+                      // locale > doc.reactions > modello
                       reactionsBuilder: (m) {
                         final local = _localReactions[m.id];
                         if (local != null) return local;
 
-                        final combined = _combinedRemoteCountsForMessage(m.id);
-                        if (combined.isNotEmpty) return combined;
+                        final doc = _remoteDocReactions[m.id];
+                        if (doc != null && doc.isNotEmpty) return doc;
 
                         return m.reactions ?? const <String, int>{};
                       },
@@ -810,7 +943,7 @@ class _MessagesList extends StatelessWidget {
     required VoiceMessage message,
   }) showReactionsOverlay;
 
-  // 🔴 MODIFICA: reazioni da mostrare
+  // reazioni da mostrare
   final Map<String, int> Function(VoiceMessage) reactionsBuilder;
 
   const _MessagesList({
@@ -839,7 +972,7 @@ class _MessagesList extends StatelessWidget {
     }
 
     return ListView.builder(
-      reverse: true, // chat-style
+      reverse: true, // chat-style, nuovi messaggi in basso
       padding: const EdgeInsets.only(bottom: 96, top: 6),
       itemCount: messages.length,
       itemBuilder: (context, i) {
@@ -886,7 +1019,7 @@ class _ChatBubble extends StatelessWidget {
   final bool isMine;
   final bool isPlaying;
   final String categoryLabel;
-  final String userName; // 👈 "Tu" o nome utente
+  final String userName; // "Tu" o nome utente
   final String distanceLabel;
   final String timeLabel;
   final VoidCallback onPlay;
@@ -894,7 +1027,7 @@ class _ChatBubble extends StatelessWidget {
   final void Function(String emoji) onToggleReaction;
   final _AdaptivePalette pal;
 
-  // 🔴 MODIFICA: reazioni già composte
+  // reazioni già composte
   final Map<String, int> reactions;
 
   _ChatBubble({
@@ -1080,12 +1213,12 @@ class _ChatBubble extends StatelessWidget {
                                 duration: message.duration,
                                 isPlaying: isPlaying,
                                 onPlay: onPlay,
-                                accent: accent,
+                                accent: message.category.color,
                                 textColor: textColor,
                               ),
                       ),
 
-                      // 🔴 MODIFICA: SPAZIO REAZIONI STABILE DENTRO LA BOLLA
+                      // Spazio reazioni stabile dentro la bolla
                       if (hasReactions)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
