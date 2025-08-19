@@ -5,6 +5,7 @@
 // - Supporta categorie (enum MessageCategory)
 // - Gestisce messaggi "custom" con nome categoria personalizzato
 // - Contiene info per riproduzione audio (localPath) e statistiche (views)
+// - (🆕) Campo invisibleTo: lista di UID che non devono vedere il messaggio
 // =============================================================================
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -46,6 +47,9 @@ class VoiceMessage {
   // 🔤 Tipo messaggio ('voice' | 'text')
   final String type;
 
+  // 🫥 (🆕) Lista di UID che NON devono poter vedere questo messaggio
+  final List<String> invisibleTo;
+
   // 👀 Comodità
   bool get isText => type == 'text';
   bool get isVoice => !isText;
@@ -66,6 +70,7 @@ class VoiceMessage {
     required this.text,
     this.localPath,
     required this.type,
+    this.invisibleTo = const [], // 🆕 default vuoto per retrocompatibilità
   });
 
   /// Factory: costruisce l'istanza a partire da un documento Firestore.
@@ -73,28 +78,33 @@ class VoiceMessage {
     final data =
         doc.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
 
-    // Timestamp
+    // ⏱️ Timestamp
     final DateTime ts = (data['timestamp'] is Timestamp)
         ? (data['timestamp'] as Timestamp).toDate()
         : DateTime.now();
 
-    // Categoria (fallback: free)
+    // 🏷️ Categoria (fallback: free)
     final catRaw = (data['category'] as String? ?? 'free').toLowerCase();
     final MessageCategory cat = MessageCategory.values.firstWhere(
       (e) => e.name.toLowerCase() == catRaw,
       orElse: () => MessageCategory.free,
     );
 
-    // Nome custom della categoria (se presente)
+    // 🏷️ Nome custom della categoria (se presente)
     final String? customName = (data['customCategoryName'] as String?)?.trim();
 
-    // Tipo messaggio (fallback: voice)
+    // 🔤 Tipo messaggio (fallback: voice)
     final String msgType =
         (data['type'] as String?)?.toLowerCase() == 'text' ? 'text' : 'voice';
 
-    // Vista/letture
+    // 👀 Vista/letture
     final int v = (data['views'] as num?)?.toInt() ?? 0;
     final List<String> vb = ((data['viewedBy'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList();
+
+    // 🫥 invisibleTo (lista di UID)
+    final List<String> inv = ((data['invisibleTo'] as List?) ?? const [])
         .map((e) => e.toString())
         .toList();
 
@@ -117,16 +127,19 @@ class VoiceMessage {
       text: (data['text'] as String?),
       localPath: null,
       type: msgType,
+      invisibleTo: inv, // 🆕
     );
   }
 
+  // Compat per UI reazioni (gestite altrove)
   get reactions => null;
 
-  /// copyWith minimale (usato dalla UI per aggiornare localPath senza ricreare tutto)
+  /// copyWith minimale (usato dalla UI per aggiornare localPath/viste/invisibleTo senza ricreare tutto)
   VoiceMessage copyWith({
     String? localPath,
     int? views,
     List<String>? viewedBy,
+    List<String>? invisibleTo, // 🆕 opzionale
   }) {
     return VoiceMessage(
       id: id,
@@ -144,12 +157,14 @@ class VoiceMessage {
       text: text,
       localPath: localPath ?? this.localPath,
       type: type,
+      invisibleTo: invisibleTo ?? List<String>.from(this.invisibleTo), // 🆕
     );
   }
 
   @override
   String toString() {
     return 'VoiceMessage(id: $id, type: $type, category: ${category.name}, '
-        'custom: $customCategoryName, views: $views, text? ${text != null})';
+        'custom: $customCategoryName, views: $views, text? ${text != null}, '
+        'invisibleTo: ${invisibleTo.length})'; // 🆕 debug friendly
   }
 }

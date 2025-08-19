@@ -1,17 +1,22 @@
 // =============================================================================
 // 📦 FILE: home_screen_ui.dart
 // =============================================================================
-// Nuvolette chat ripristinate + nome utente ("Tu" sui miei messaggi), timer,
-// viste, reazioni (pressione prolungata) e onda audio animata (solo in play).
-// Nessuna progress bar nella nuvoletta. Dark mode compatibile (no API deprecate).
+// ✅ NOVITÀ DI QUESTA VERSIONE (copia/incolla tutto questo file)
+// - LONG PRESS sulla bolla: mostra SOLO le azioni "Segnala" e "Blocca/Ignora".
+//   👉 NIENTE più reazioni nel long-press (come richiesto).
+// - TAP sulla faccina 🙂 dentro la bolla: apre il selettore reazioni.
+// - "Segnala": ha un fallback interno (dialog + scrittura su `reports/`).
+// - **MODIFICA RICHIESTA:** il box/pill delle reazioni viene spostato di
+//   **+5px a destra SOLO per i messaggi ricevuti** (non miei).
+//   🔎 Vedi il metodo `_showReactionsOverlay(...)` per i commenti dettagliati.
 // =============================================================================
 
 import 'dart:math' as math;
-import 'dart:async'; // 🔴 MODIFICA: StreamSubscription per listener doc messaggi
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // 🔴 MODIFICA: Firestore
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'category_utils.dart'
     show
@@ -22,7 +27,6 @@ import 'category_utils.dart'
         displayCategoryLabel;
 import 'voice_message.dart';
 
-// Helper compat: sostituisce withOpacity (deprecato)
 Color _alpha(Color c, double opacity01) =>
     c.withAlpha(((opacity01.clamp(0.0, 1.0)) * 255).round());
 
@@ -59,7 +63,6 @@ class _AdaptivePalette {
         MediaQuery.platformBrightnessOf(context) == Brightness.dark;
     final actuallyDark = theme.brightness == Brightness.dark || platformDark;
 
-    // Fallback dark “sicuro”
     final ColorScheme darkSafe = ColorScheme.dark(
       primary: accent ?? cs.primary,
       secondary: cs.secondary,
@@ -97,7 +100,7 @@ class _AdaptivePalette {
 }
 
 // =============================================================================
-/* 🧩 HomeScreenUI */
+// 🧩 HomeScreenUI
 // =============================================================================
 class HomeScreenUI extends StatefulWidget {
   final bool showWelcomeMessage;
@@ -122,20 +125,13 @@ class HomeScreenUI extends StatefulWidget {
   final bool isWaitingForRelease;
 
   final String? playingMessageId;
-
-  final TextEditingController textController;
-  final String textError;
-  final bool isSendingText;
-
   final void Function(VoiceMessage) onPlayMessage;
 
   final VoidCallback onToggleRadiusSelector;
   final void Function(MessageCategory) onFilterToggled;
   final VoidCallback onToggleFilterSelector;
-
   final void Function(MessageCategory) onCategorySelected;
   final VoidCallback onToggleCategorySelector;
-
   final VoidCallback onSettingsPressed;
   final VoidCallback onProfilePressed;
 
@@ -147,11 +143,17 @@ class HomeScreenUI extends StatefulWidget {
   final VoidCallback onWelcomeDismissed;
   final Future<void> Function(double) onRadiusChanged;
 
+  final TextEditingController textController;
+  final String textError;
+  final bool isSendingText;
   final VoidCallback onSendText;
 
   final void Function(VoiceMessage) onTextVisible;
-
   final void Function(VoiceMessage, String) onToggleReaction;
+
+  // Callback opzionali esterne (blocco OK, report ha fallback interno)
+  final void Function(VoiceMessage message)? onRequestBlockUser;
+  final void Function(VoiceMessage message)? onRequestReportUser;
 
   const HomeScreenUI({
     super.key,
@@ -192,6 +194,8 @@ class HomeScreenUI extends StatefulWidget {
     required this.onSendText,
     required this.onTextVisible,
     required this.onToggleReaction,
+    this.onRequestBlockUser,
+    this.onRequestReportUser,
   });
 
   @override
@@ -202,30 +206,24 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   final Set<String> _textVisibilityNotified = {};
   OverlayEntry? _reactionsOverlay;
 
-  // 🔴 MODIFICA: stato reazioni (solo documento "messages/{id}")
-  final Map<String, Map<String, int>> _localReactions = {}; // ottimistico
-  final Map<String, Map<String, int>> _remoteDocReactions =
-      {}; // messages.reactions (emoji->count)
-  final Map<String, String> _myReactionFromDoc =
-      {}; // messages.reactionsByUser[uid] -> emoji
-  final Map<String, String> _myReactionLocal =
-      {}; // ottimistico (uid->emoji per quel messaggio)
-
-  // 🔴 MODIFICA: listener SOLO sul documento del messaggio
+  final Map<String, Map<String, int>> _localReactions = {};
+  final Map<String, Map<String, int>> _remoteDocReactions = {};
+  final Map<String, String> _myReactionFromDoc = {};
+  final Map<String, String> _myReactionLocal = {};
   final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
       _docSubs = {};
 
   @override
   void initState() {
     super.initState();
-    _refreshReactionSubscriptions(); // 🔴 MODIFICA
+    _refreshReactionSubscriptions();
   }
 
   @override
   void didUpdateWidget(covariant HomeScreenUI oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.filteredMessages != widget.filteredMessages) {
-      _refreshReactionSubscriptions(); // 🔴 MODIFICA
+      _refreshReactionSubscriptions();
     }
   }
 
@@ -238,12 +236,9 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     super.dispose();
   }
 
-  // 🔴 MODIFICA: attach listeners SOLO a messages/{id} per leggere
-  //              reactions (emoji->count) e reactionsByUser (uid->emoji)
   void _refreshReactionSubscriptions() {
     final ids = widget.filteredMessages.map((m) => m.id).toSet();
 
-    // rimuovi vecchi
     for (final id in _docSubs.keys.toList()) {
       if (!ids.contains(id)) {
         _docSubs[id]?.cancel();
@@ -253,7 +248,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       }
     }
 
-    // aggiungi nuovi
     for (final m in widget.filteredMessages) {
       final docRef =
           FirebaseFirestore.instance.collection('messages').doc(m.id);
@@ -263,12 +257,13 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
           final data = snap.data();
           if (data == null) return;
 
-          // counts
-          final Map<String, int> counts =
-              Map<String, int>.from(data['reactions'] ?? {});
-          final prevCounts = _remoteDocReactions[m.id];
+          final Map<String, int> counts = Map<String, int>.from(
+            (data['reactions'] ?? const <String, int>{}).map((k, v) => MapEntry(
+                  k.toString(),
+                  v is int ? v : (v as num?)?.toInt() ?? 0,
+                )),
+          );
 
-          // my emoji (da reactionsByUser)
           final uid = widget.currentUserId ?? '';
           final Map<String, dynamic> byUserDyn =
               Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
@@ -276,9 +271,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
               byUserDyn[uid] is String ? byUserDyn[uid] as String : null;
 
           setState(() {
-            if (prevCounts == null || !_mapEquals(prevCounts, counts)) {
-              _remoteDocReactions[m.id] = counts;
-            }
+            _remoteDocReactions[m.id] = counts;
             if (myEmoji != null) {
               _myReactionFromDoc[m.id] = myEmoji;
             } else {
@@ -299,7 +292,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     if (_covers(remote, local)) {
       setState(() => _localReactions.remove(id));
     }
-    // anche per la mia emoji locale:
     if (_myReactionLocal.containsKey(id) &&
         _myReactionFromDoc.containsKey(id)) {
       setState(() => _myReactionLocal.remove(id));
@@ -309,15 +301,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   bool _covers(Map<String, int> remote, Map<String, int> local) {
     for (final e in local.entries) {
       if ((remote[e.key] ?? 0) < e.value) return false;
-    }
-    return true;
-  }
-
-  bool _mapEquals(Map<String, int> a, Map<String, int> b) {
-    if (identical(a, b)) return true;
-    if (a.length != b.length) return false;
-    for (final e in a.entries) {
-      if (b[e.key] != e.value) return false;
     }
     return true;
   }
@@ -339,13 +322,12 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return '${(meters / 1000).toStringAsFixed(1)} km';
   }
 
-  // Bucket qualitativi per messaggi ricevuti
   String _formatDistanceBucket(double meters) {
     if (meters <= 500) return 'molto vicino';
-    if (meters > 500 && meters <= 1000) return 'vicino';
-    if (meters > 1000 && meters <= 2000) return 'in zona';
-    if (meters > 2000 && meters <= 3000) return 'distante';
-    if (meters > 3000 && meters <= 6000) return 'molto distante';
+    if (meters <= 1000) return 'vicino';
+    if (meters <= 2000) return 'in zona';
+    if (meters <= 3000) return 'distante';
+    if (meters <= 6000) return 'molto distante';
     return 'molto distante';
   }
 
@@ -373,11 +355,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     _reactionsOverlay = null;
   }
 
-  // 🔴 MODIFICA: persistenza reazione TUTTO NEL DOCUMENTO "messages/{id}"
-  // - Aggiorna atomicamente:
-  //   reactions: Map<emoji,int>
-  //   reactionsByUser: Map<uid,emoji>
-  //   Ritorna true/false per gestire rollback in UI
   Future<bool> _persistReaction(VoiceMessage message, String newEmoji) async {
     final uid = widget.currentUserId;
     if (uid == null) return false;
@@ -390,10 +367,12 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         if (!snap.exists) return;
 
         final data = snap.data() as Map<String, dynamic>;
-        final Map<String, dynamic> rawCounts =
-            Map<String, dynamic>.from(data['reactions'] ?? {});
-        final Map<String, int> counts = rawCounts
-            .map((k, v) => MapEntry(k, (v is int) ? v : (v as num).toInt()));
+
+        final Map<String, int> counts = Map<String, int>.from(
+          (data['reactions'] ?? const <String, int>{}).map(
+            (k, v) => MapEntry(k.toString(), v is int ? v : (v as num).toInt()),
+          ),
+        );
 
         final Map<String, dynamic> rawByUser =
             Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
@@ -403,9 +382,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         });
 
         final prevEmoji = byUser[uid];
-        if (prevEmoji == newEmoji) return; // nulla da fare
+        if (prevEmoji == newEmoji) return;
 
-        // decremento vecchia (se c'era)
         if (prevEmoji != null) {
           final oldVal = (counts[prevEmoji] ?? 0) - 1;
           if (oldVal > 0) {
@@ -415,10 +393,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
           }
         }
 
-        // incremento nuova
         counts[newEmoji] = (counts[newEmoji] ?? 0) + 1;
-
-        // aggiorno mappa utente->emoji
         byUser[uid] = newEmoji;
 
         tx.update(docRef, {
@@ -428,13 +403,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         });
       });
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
 
-  // 🔴 MODIFICA (TOGGLE OFF): persistenza rimozione reazione nel doc messages/{id}
-  //   Ritorna true/false per gestire rollback in UI
   Future<bool> _persistReactionRemoval(VoiceMessage message) async {
     final uid = widget.currentUserId;
     if (uid == null) return false;
@@ -449,10 +422,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
         final data = snap.data() as Map<String, dynamic>;
 
-        final Map<String, dynamic> rawCounts =
-            Map<String, dynamic>.from(data['reactions'] ?? {});
-        final Map<String, int> counts = rawCounts
-            .map((k, v) => MapEntry(k, (v is int) ? v : (v as num).toInt()));
+        final Map<String, int> counts = Map<String, int>.from(
+          (data['reactions'] ?? const <String, int>{}).map(
+            (k, v) => MapEntry(k.toString(), v is int ? v : (v as num).toInt()),
+          ),
+        );
 
         final Map<String, dynamic> rawByUser =
             Map<String, dynamic>.from(data['reactionsByUser'] ?? {});
@@ -462,7 +436,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         });
 
         final prevEmoji = byUser[uid];
-        if (prevEmoji == null) return; // niente da rimuovere
+        if (prevEmoji == null) return;
 
         final newVal = (counts[prevEmoji] ?? 0) - 1;
         if (newVal > 0) {
@@ -479,18 +453,14 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         });
       });
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
 
-  // 🔴 MODIFICA: applicazione locale (ottimistico) con vincolo 1 reazione/utente
-  //              + rollback se write fallisce
   Future<void> _applyLocalReaction(VoiceMessage message, String emoji) async {
-    final prevEmoji =
-        _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+    final prev = _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
 
-    // stato ottimistico
     Map<String, int>? before;
     setState(() {
       final base = Map<String, int>.from(
@@ -500,14 +470,14 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       );
       before = Map<String, int>.from(base);
 
-      if (prevEmoji == null) {
+      if (prev == null) {
         base[emoji] = (base[emoji] ?? 0) + 1;
-      } else if (prevEmoji != emoji) {
-        final old = (base[prevEmoji] ?? 0) - 1;
+      } else if (prev != emoji) {
+        final old = (base[prev] ?? 0) - 1;
         if (old > 0) {
-          base[prevEmoji] = old;
+          base[prev] = old;
         } else {
-          base.remove(prevEmoji);
+          base.remove(prev);
         }
         base[emoji] = (base[emoji] ?? 0) + 1;
       }
@@ -517,17 +487,15 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
     final ok = await _persistReaction(message, emoji);
     if (!ok) {
-      // 🔴 rollback se fallisce (permessi/rete)
       setState(() {
         if (before != null) _localReactions[message.id] = before!;
         _myReactionLocal.remove(message.id);
       });
     } else {
-      widget.onToggleReaction(message, emoji); // callback esistente
+      widget.onToggleReaction(message, emoji);
     }
   }
 
-  // 🔴 MODIFICA (TOGGLE OFF): rimozione locale + rollback se write fallisce
   Future<void> _applyLocalReactionRemoval(VoiceMessage message) async {
     final prev = _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
     if (prev == null) return;
@@ -554,7 +522,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
     final ok = await _persistReactionRemoval(message);
     if (!ok) {
-      // 🔴 rollback se fallisce
       setState(() {
         if (before != null) _localReactions[message.id] = before!;
         _myReactionLocal[message.id] = prev;
@@ -562,30 +529,73 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     }
   }
 
+  // ===========================================================================
+  // 🎯 Overlay reazioni (reaction picker)
+  //  - Mostra la pill con le emoji
+  //  - **MODIFICA RICHIESTA**: SHIFT di **+5px SOLO** per i messaggi ricevuti
+  //    (non miei). La logica è commentata nel calcolo della variabile `left`.
+  //  - Clamp orizzontale per non uscire dallo schermo.
+  // ===========================================================================
   void _showReactionsOverlay({
     required BuildContext context,
     required GlobalKey anchorKey,
     required VoiceMessage message,
   }) {
+    // Chiude un eventuale overlay precedente (evita duplicati)
     _hideReactionsOverlay();
+
+    // Feedback aptico gradevole
     HapticFeedback.mediumImpact();
 
-    final box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
-    final overlayBox =
+    // Calcola geometrie necessarie per posizionare la pill
+    final RenderBox? box =
+        anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    final RenderBox? overlayBox =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (box == null || overlayBox == null) return;
 
-    final offset = box.localToGlobal(Offset.zero, ancestor: overlayBox);
-    final size = box.size;
+    // Offset assoluto (rispetto all'overlay) e dimensioni della bolla messaggio
+    final Offset offset = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size size = box.size;
 
-    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+    // Emojis disponibili
+    const List<String> emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
+    // --- POSIZIONAMENTO X ----------------------------------------------------
+    // Stimiamo la "mezza" larghezza della pill (≈ 360px totali → 180px metà)
+    const double kPillHalfWidth = 180.0;
+    const double kPillWidth = kPillHalfWidth * 2;
+
+    // Base: centriamo la pill orizzontalmente rispetto alla bolla messaggio
+    double left = offset.dx + (size.width / 2) - kPillHalfWidth;
+
+    // 🔧 **MODIFICA**: sposta la pill di **+5px verso destra SOLO per i
+    // messaggi *ricevuti* (non sono i miei). Riconosciamo il "ricevuto"
+    // verificando che il senderId sia diverso dall'uid corrente.
+    final bool isReceived = message.senderId != (widget.currentUserId ?? '');
+    if (isReceived) {
+      left += 5.0; // <-- SHIFT desiderato SOLO sui messaggi ricevuti
+    }
+
+    // Evita che esca dallo schermo (8px di margine ai lati)
+    const double kSidePadding = 8.0;
+    final double maxLeft = overlayBox.size.width - kPillWidth - kSidePadding;
+    left = left.clamp(kSidePadding, maxLeft);
+
+    // --- POSIZIONAMENTO Y ----------------------------------------------------
+    // Posizioniamo la pill sopra la bolla (64px sopra), con clamp verticale.
+    final double top = (offset.dy - 64).clamp(12.0, double.infinity);
+
+    // Crea l'overlay
     _reactionsOverlay = OverlayEntry(
       builder: (_) {
-        final current =
+        // Emoji eventualmente già selezionata dall'utente
+        final String? current =
             _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+
         return Stack(
           children: [
+            // Tappando fuori si chiude l'overlay
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -593,14 +603,18 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                 child: const SizedBox.expand(),
               ),
             ),
+
+            // La "pill" delle reazioni
             Positioned(
-              left: offset.dx + (size.width / 2) - 180,
-              top: (offset.dy - 64).clamp(12.0, double.infinity),
+              left: left,
+              top: top,
               child: Material(
                 color: Colors.transparent,
                 child: Container(
+                  // Padding interno della pill
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  // Aspetto grafico della pill
                   decoration: BoxDecoration(
                     color: _alpha(Colors.black, 0.92),
                     borderRadius: BorderRadius.circular(28),
@@ -609,24 +623,25 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         color: Color(0x61000000),
                         blurRadius: 10,
                         offset: Offset(0, 4),
-                      )
+                      ),
                     ],
                   ),
+                  // Riga con le emoji selezionabili
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: emojis.map((e) {
-                      final selected =
-                          current == e; // 🔴 MODIFICA: evidenzia emoji attuale
+                      final bool selected = current == e;
                       return InkWell(
                         borderRadius: BorderRadius.circular(16),
                         onTap: () async {
                           HapticFeedback.selectionClick();
-                          // 🔴 MODIFICA: toggle off (stessa emoji) o switch
+                          // Se tocco l'emoji già selezionata → rimuovo la mia reazione
                           if (selected) {
                             await _applyLocalReactionRemoval(message);
                             _hideReactionsOverlay();
                             return;
                           }
+                          // Altrimenti applico la nuova reazione
                           await _applyLocalReaction(message, e);
                           _hideReactionsOverlay();
                         },
@@ -634,7 +649,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 4),
                           child: Opacity(
-                            opacity: selected ? 0.55 : 1,
+                            opacity: selected ? 0.55 : 1.0, // feedback visivo
                             child:
                                 Text(e, style: const TextStyle(fontSize: 24)),
                           ),
@@ -650,6 +665,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       },
     );
 
+    // Inserisci l'overlay nello stack dell'app
     Overlay.of(context).insert(_reactionsOverlay!);
   }
 
@@ -659,8 +675,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         widget.textController.text.characters.length <= 250 &&
         !widget.isSendingText;
 
-    final pal =
-        _AdaptivePalette.of(context, accent: widget.selectedCategory.color);
+    _AdaptivePalette.of(context, accent: widget.selectedCategory.color);
 
     return Stack(
       children: [
@@ -675,31 +690,25 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
               onToggleRadiusSelector: widget.onToggleRadiusSelector,
               selectedRadius: widget.selectedRadius,
             ),
-
             if (widget.showCategorySelector)
               CategorySelector(
                 selectedCategory: widget.selectedCategory,
                 onCategorySelected: widget.onCategorySelected,
                 onClose: widget.onToggleCategorySelector,
               ),
-
             if (widget.showFilterSelector)
               FilterSelector(
                 activeFilters: widget.activeFilters,
                 onFilterToggled: widget.onFilterToggled,
                 onClose: widget.onToggleFilterSelector,
               ),
-
             if (widget.showRadiusSelector)
               _RadiusSelector(
                 current: widget.selectedRadius,
                 options: widget.radiusOptions,
                 onSelected: widget.onRadiusChanged,
               ),
-
             const SizedBox(height: 4),
-
-            // Lista nuvolette
             Expanded(
               child: widget.isInitialized
                   ? _MessagesList(
@@ -713,7 +722,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         m.category,
                         messageCustomName: m.customCategoryName,
                       ),
-                      // 👤 "Tu" sui miei, nome altrui sugli altri
                       userNameBuilder: (m) {
                         final myId = widget.currentUserId ?? '';
                         if (m.senderId == myId) return 'Tu';
@@ -729,23 +737,32 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                             : _formatDistanceBucket(d);
                       },
                       timeBuilder: _formatRelative,
-                      pal: pal,
-                      showReactionsOverlay: _showReactionsOverlay,
-
-                      // locale > doc.reactions > modello
+                      pal: _AdaptivePalette.of(
+                        context,
+                        accent: widget.selectedCategory.color,
+                      ),
                       reactionsBuilder: (m) {
                         final local = _localReactions[m.id];
                         if (local != null) return local;
-
                         final doc = _remoteDocReactions[m.id];
                         if (doc != null && doc.isNotEmpty) return doc;
-
                         return m.reactions ?? const <String, int>{};
                       },
+                      onRequestBlockUser: widget.onRequestBlockUser,
+                      onRequestReportUser: widget.onRequestReportUser,
+                      showReactionsOverlay: ({
+                        required BuildContext context,
+                        required GlobalKey anchorKey,
+                        required VoiceMessage message,
+                      }) =>
+                          _showReactionsOverlay(
+                        context: context,
+                        anchorKey: anchorKey,
+                        message: message,
+                      ),
                     )
                   : const Center(child: CircularProgressIndicator()),
             ),
-
             if (!widget.showWelcomeMessage)
               _ComposerBar(
                 selectedCategory: widget.selectedCategory,
@@ -877,7 +894,7 @@ class _TopBar extends StatelessWidget {
 }
 
 // =============================================================================
-// 📡 Radius selector
+// 📡 Selettore raggio
 // =============================================================================
 class _RadiusSelector extends StatelessWidget {
   final double current;
@@ -929,22 +946,29 @@ class _MessagesList extends StatelessWidget {
   final List<VoiceMessage> messages;
   final String? playingMessageId;
   final String? currentUserId;
+
   final void Function(VoiceMessage) onPlayMessage;
   final void Function(VoiceMessage) onTextVisible;
+
   final String Function(VoiceMessage) labelBuilder;
   final String Function(VoiceMessage) userNameBuilder;
   final String Function(VoiceMessage) distanceBuilder;
   final String Function(DateTime) timeBuilder;
+
   final void Function(VoiceMessage, String) onToggleReaction;
+
   final _AdaptivePalette pal;
+
   final void Function({
     required BuildContext context,
     required GlobalKey anchorKey,
     required VoiceMessage message,
   }) showReactionsOverlay;
 
-  // reazioni da mostrare
   final Map<String, int> Function(VoiceMessage) reactionsBuilder;
+
+  final void Function(VoiceMessage message)? onRequestBlockUser;
+  final void Function(VoiceMessage message)? onRequestReportUser;
 
   const _MessagesList({
     required this.messages,
@@ -960,7 +984,166 @@ class _MessagesList extends StatelessWidget {
     required this.pal,
     required this.showReactionsOverlay,
     required this.reactionsBuilder,
+    this.onRequestBlockUser,
+    this.onRequestReportUser,
   });
+
+  // 🆕 Flow di segnalazione (fallback interno se non fornisci un callback)
+  Future<void> _reportFlow(BuildContext context, VoiceMessage m) async {
+    // Se l'app fornisce un callback esterno, usalo e basta
+    if (onRequestReportUser != null) {
+      onRequestReportUser!(m);
+      return;
+    }
+
+    final TextEditingController reasonCtrl = TextEditingController();
+    final bool confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Segnala utente'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                    'Descrivi brevemente il motivo della segnalazione (opzionale):'),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'Es. spam, linguaggio offensivo…',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annulla'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Invia'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    final reporter = (currentUserId ?? 'anon');
+    final payload = {
+      'messageId': m.id,
+      'targetUserId': m.senderId,
+      'targetUserName': (m.name).trim().isEmpty ? 'Anonimo' : m.name.trim(),
+      'reporterUserId': reporter,
+      'reason': reasonCtrl.text.trim(),
+      'timestamp': FieldValue.serverTimestamp(),
+      'messageType': m.type,
+      'category': m.category.name,
+      'latitude': m.latitude,
+      'longitude': m.longitude,
+    };
+
+    try {
+      await FirebaseFirestore.instance.collection('reports').add(payload);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Segnalazione inviata. Grazie!')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Segnalazione non inviata: ${e.toString()}',
+              maxLines: 3,
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  // SOLO azioni Segnala/Blocca sul long-press
+  Future<void> _showMessageActions(
+    BuildContext context,
+    VoiceMessage m,
+    GlobalKey anchorKey,
+  ) async {
+    HapticFeedback.mediumImpact();
+
+    final isMine = m.senderId == (currentUserId ?? '');
+    final displayName = isMine
+        ? 'te stesso'
+        : ((m.name).trim().isEmpty ? 'Anonimo' : m.name.trim());
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: pal.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 🔶 Segnala
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Colors.orange),
+                title: isMine
+                    ? const Text('Non puoi segnalare te stesso')
+                    : Text(
+                        'Segnala ${displayName == 'Anonimo' ? 'utente' : displayName}'),
+                subtitle: isMine
+                    ? const Text('Operazione non consentita')
+                    : const Text('Invia una segnalazione'),
+                enabled: !isMine,
+                onTap: isMine
+                    ? null
+                    : () async {
+                        Navigator.pop(ctx);
+                        await _reportFlow(context, m); // <-- Fallback interno
+                      },
+              ),
+              // ⛔ Blocca/Ignora (usa la tua logica se passata)
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.redAccent),
+                title: Text(isMine
+                    ? 'Non puoi bloccare te stesso'
+                    : 'Blocca/Ignora $displayName'),
+                subtitle: isMine
+                    ? const Text('Operazione non consentita')
+                    : const Text('Non vedrai più i messaggi di questo utente'),
+                enabled: !isMine,
+                onTap: isMine
+                    ? null
+                    : () {
+                        Navigator.pop(ctx);
+                        if (onRequestBlockUser != null) {
+                          onRequestBlockUser!(m);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Azione di blocco non collegata: collega onRequestBlockUser nel parent.'),
+                            ),
+                          );
+                        }
+                      },
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -972,7 +1155,7 @@ class _MessagesList extends StatelessWidget {
     }
 
     return ListView.builder(
-      reverse: true, // chat-style, nuovi messaggi in basso
+      reverse: true,
       padding: const EdgeInsets.only(bottom: 96, top: 6),
       itemCount: messages.length,
       itemBuilder: (context, i) {
@@ -988,6 +1171,13 @@ class _MessagesList extends StatelessWidget {
         final isPlaying = playingMessageId == m.id;
         final reactions = reactionsBuilder(m);
 
+        // ignore: no_leading_underscores_for_local_identifiers
+        void _openReactions(GlobalKey key) => showReactionsOverlay(
+              context: context,
+              anchorKey: key,
+              message: m,
+            );
+
         return _ChatBubble(
           message: m,
           isMine: isMine,
@@ -997,11 +1187,13 @@ class _MessagesList extends StatelessWidget {
           distanceLabel: distanceBuilder(m),
           timeLabel: timeBuilder(m.timestamp),
           onPlay: () => onPlayMessage(m),
-          onLongPress: (key) => showReactionsOverlay(
-            context: context,
-            anchorKey: key,
-            message: m,
-          ),
+
+          // 👉 LONG PRESS: SOLO Segnala/Blocca
+          onLongPress: (key) => _showMessageActions(context, m, key),
+
+          // 👉 TAP sulla faccina: SOLO reazioni
+          onOpenReactions: _openReactions,
+
           onToggleReaction: (emoji) => onToggleReaction(m, emoji),
           pal: pal,
           reactions: reactions,
@@ -1012,22 +1204,23 @@ class _MessagesList extends StatelessWidget {
 }
 
 // =============================================================================
-// 💬 Chat bubble (spazio reazioni DENTRO la bolla, sotto il body)
+// 💬 Chat bubble
 // =============================================================================
 class _ChatBubble extends StatelessWidget {
   final VoiceMessage message;
   final bool isMine;
   final bool isPlaying;
+
   final String categoryLabel;
-  final String userName; // "Tu" o nome utente
+  final String userName;
   final String distanceLabel;
   final String timeLabel;
+
   final VoidCallback onPlay;
   final void Function(GlobalKey) onLongPress;
+  final void Function(GlobalKey) onOpenReactions;
   final void Function(String emoji) onToggleReaction;
   final _AdaptivePalette pal;
-
-  // reazioni già composte
   final Map<String, int> reactions;
 
   _ChatBubble({
@@ -1040,6 +1233,7 @@ class _ChatBubble extends StatelessWidget {
     required this.timeLabel,
     required this.onPlay,
     required this.onLongPress,
+    required this.onOpenReactions,
     required this.onToggleReaction,
     required this.pal,
     required this.reactions,
@@ -1066,7 +1260,6 @@ class _ChatBubble extends StatelessWidget {
     final Color textColor = isMine ? pal.onBubbleMine : pal.onBubbleOther;
 
     final alignment = isMine ? Alignment.centerRight : Alignment.centerLeft;
-    final cross = isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start;
 
     const Radius r = Radius.circular(16);
     final borderRadius = isMine
@@ -1084,6 +1277,7 @@ class _ChatBubble extends StatelessWidget {
           );
 
     final bool hasReactions = reactions.entries.any((e) => e.value > 0);
+    final double maxBubbleWidth = MediaQuery.sizeOf(context).width * 0.72;
 
     Widget viewsChip() {
       final views = message.views;
@@ -1113,152 +1307,37 @@ class _ChatBubble extends StatelessWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: Align(
-        alignment: alignment,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.sizeOf(context).width * 0.86,
-          ),
-          child: Column(
-            crossAxisAlignment: cross,
-            children: [
-              GestureDetector(
-                key: _bubbleKey,
-                onLongPress: () => onLongPress(_bubbleKey),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: bubbleBg,
-                    borderRadius: borderRadius,
-                    border: Border.all(color: _alpha(accent, 0.35), width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _alpha(Colors.black, 0.05),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      )
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Header: categoria + distanza
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-                        child: Row(
-                          children: [
-                            Icon(message.category.icon,
-                                size: 16, color: accent),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                categoryLabel,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: accent,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.location_on,
-                                size: 16, color: Colors.grey),
-                            const SizedBox(width: 2),
-                            Text(
-                              distanceLabel,
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey[700]),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // 👤 Nome utente
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.person,
-                                size: 14, color: Colors.grey),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                userName,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: Colors.grey[700],
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Body (testo o voce)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-                        child: message.isText
-                            ? Text(
-                                message.text ?? '',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: textColor,
-                                  height: 1.25,
-                                ),
-                              )
-                            : _VoiceRow(
-                                duration: message.duration,
-                                isPlaying: isPlaying,
-                                onPlay: onPlay,
-                                accent: message.category.color,
-                                textColor: textColor,
-                              ),
-                      ),
-
-                      // Spazio reazioni stabile dentro la bolla
-                      if (hasReactions)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
-                          child: Align(
-                            alignment: isMine
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: _ReactionsPill(
-                              reactions: reactions,
-                              isMine: isMine,
-                              pal: pal,
-                            ),
-                          ),
-                        ),
-
-                      // Footer: ora + countdown + viste
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
-                        child: Row(
-                          children: [
-                            Text(
-                              timeLabel,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[700],
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const Spacer(),
-                            countdownChip(),
-                            const SizedBox(width: 12),
-                            viewsChip(),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        // 👉 SOLO long-press per azioni
+        onLongPress: () => onLongPress(_bubbleKey),
+        child: Align(
+          alignment: alignment,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxBubbleWidth),
+            child: _BubbleCore(
+              key: _bubbleKey,
+              bubbleBg: bubbleBg,
+              borderRadius: borderRadius,
+              accent: accent,
+              message: message,
+              categoryLabel: categoryLabel,
+              distanceLabel: distanceLabel,
+              userName: userName,
+              textColor: textColor,
+              isMine: isMine,
+              hasReactions: hasReactions,
+              reactions: reactions,
+              pal: pal,
+              timeLabel: timeLabel,
+              countdownChip: countdownChip,
+              viewsChip: viewsChip,
+              onPlay: onPlay,
+              isPlaying: isPlaying,
+              // 👉 TAP sulla faccina reazioni
+              onOpenReactions: () => onOpenReactions(_bubbleKey),
+            ),
           ),
         ),
       ),
@@ -1266,7 +1345,191 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
-// 🔧 Widget pill reazioni (emoji + conteggio)
+class _BubbleCore extends StatelessWidget {
+  final Color bubbleBg;
+  final BorderRadius borderRadius;
+  final Color accent;
+  final VoiceMessage message;
+  final String categoryLabel;
+  final String distanceLabel;
+  final String userName;
+  final Color textColor;
+  final bool isMine;
+  final bool hasReactions;
+  final Map<String, int> reactions;
+  final _AdaptivePalette pal;
+  final String timeLabel;
+  final Widget Function() countdownChip;
+  final Widget Function() viewsChip;
+  final VoidCallback onPlay;
+  final bool isPlaying;
+  final VoidCallback onOpenReactions;
+
+  const _BubbleCore({
+    super.key,
+    required this.bubbleBg,
+    required this.borderRadius,
+    required this.accent,
+    required this.message,
+    required this.categoryLabel,
+    required this.distanceLabel,
+    required this.userName,
+    required this.textColor,
+    required this.isMine,
+    required this.hasReactions,
+    required this.reactions,
+    required this.pal,
+    required this.timeLabel,
+    required this.countdownChip,
+    required this.viewsChip,
+    required this.onPlay,
+    required this.isPlaying,
+    required this.onOpenReactions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: bubbleBg,
+        borderRadius: borderRadius,
+        border: Border.all(color: _alpha(accent, 0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _alpha(Colors.black, 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header categoria + distanza
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+            child: Row(
+              children: [
+                Icon(message.category.icon, size: 16, color: accent),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    categoryLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: accent,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.location_on, size: 16, color: Colors.grey),
+                const SizedBox(width: 2),
+                Text(
+                  distanceLabel,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+              ],
+            ),
+          ),
+
+          // Nome utente
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Row(
+              children: [
+                const Icon(Icons.person, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    userName,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Corpo (testo o audio)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            child: message.isText
+                ? Text(
+                    message.text ?? '',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: textColor,
+                      height: 1.25,
+                    ),
+                  )
+                : _VoiceRow(
+                    duration: message.duration,
+                    isPlaying: isPlaying,
+                    onPlay: onPlay,
+                    accent: accent,
+                    textColor: textColor,
+                  ),
+          ),
+
+          // Reazioni aggregate (se presenti)
+          if (hasReactions)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+              child: Align(
+                alignment:
+                    isMine ? Alignment.centerRight : Alignment.centerLeft,
+                child: _ReactionsPill(
+                  reactions: reactions,
+                  isMine: isMine,
+                  pal: pal,
+                ),
+              ),
+            ),
+
+          // Footer: ora + faccina + countdown + views
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
+            child: Row(
+              children: [
+                const SizedBox(width: 4),
+                Text(
+                  timeLabel,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[700],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Tooltip(
+                  message: 'Reazioni',
+                  child: IconButton(
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 20,
+                    onPressed: onOpenReactions,
+                    icon: const Icon(Icons.emoji_emotions_outlined),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                countdownChip(),
+                const SizedBox(width: 12),
+                viewsChip(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Pill reazioni
 class _ReactionsPill extends StatelessWidget {
   final Map<String, int> reactions;
   final bool isMine;
@@ -1321,8 +1584,7 @@ class _ReactionsPill extends StatelessWidget {
                   e.value.toString(),
                   style: TextStyle(
                     fontSize: 12,
-                    // ignore: deprecated_member_use
-                    color: pal.onSurface.withOpacity(0.75),
+                    color: _alpha(pal.onSurface, 0.75),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1336,7 +1598,7 @@ class _ReactionsPill extends StatelessWidget {
 }
 
 // =============================================================================
-// 🎵 Riga audio con Onda ANIMATA (no progress bar)
+// 🎵 Riga audio
 // =============================================================================
 class _VoiceRow extends StatefulWidget {
   final int duration;
@@ -1368,7 +1630,6 @@ class _VoiceRowState extends State<_VoiceRow>
       vsync: this,
       duration: const Duration(milliseconds: 1400),
     );
-
     if (widget.isPlaying) _ctrl.repeat();
   }
 
@@ -1408,7 +1669,7 @@ class _VoiceRowState extends State<_VoiceRow>
                 return CustomPaint(
                   painter: _AnimatedWavePainter(
                     color: _alpha(widget.accent, 0.85),
-                    progress: _ctrl.value, // 0..1
+                    progress: _ctrl.value,
                     playing: widget.isPlaying,
                   ),
                 );
@@ -1428,7 +1689,7 @@ class _VoiceRowState extends State<_VoiceRow>
 
 class _AnimatedWavePainter extends CustomPainter {
   final Color color;
-  final double progress; // 0..1
+  final double progress;
   final bool playing;
 
   _AnimatedWavePainter({

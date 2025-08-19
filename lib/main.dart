@@ -1,16 +1,9 @@
-// main.dart — completo (Material 3, no composer duplicato, listener ottimizzato)
-// 🔧 Patch già incluse:
-// - In backgroundNotificationHandler(): se type == 'text' non cancellare su Storj.
-// - In _cleanupOldMessages(): cancella su Storj solo se message.isVoice.
-// - In _runStartupCleanup(): se type == 'text' non cancellare su Storj.
-// ✅ Reazioni: toggle su campo Firestore `reactions.<emoji>` (array di uid).
-// ✅ Fix welcome: pannello profilo e barra input NON compaiono quando è visibile il welcome.
-// ✅ Material 3 + dark mode.
-// ✅ Rimosso composer overlay in basso (ora solo dentro HomeScreenUI).
-// 🆕 Age Gate: se `data_di_nascita` è null, mostra form obbligatorio all’avvio (età minima 16 anni).
-//    Testi/modifiche centralizzati in AgeGateConfig/AgeGateStrings. Avviso sospensione per dati falsi.
-// ✅ Categorie personalizzate: scrittura/lettura di `customCategoryName` su Firestore.
-// ✅ VISIBILITÀ: listener Firestore senza filtro WHERE su timestamp (vede subito i messaggi nuovi).
+// main.dart — completo (Material 3, dark mode, blocco utenti, reazioni ottimizzate)
+//
+// NOTE di manutenzione su questa revisione:
+// - Aggiunte graffe per tutti gli `if (...) return;` (lint: curly_braces_in_flow_control_structures)
+// - Evitato l'uso del BuildContext dopo gli await senza `mounted` (lint: use_build_context_synchronously)
+// - Ridotti i cast superflui con DocumentSnapshot tipizzati (lint: unnecessary_cast)
 
 import 'dart:async';
 import 'dart:io';
@@ -249,7 +242,9 @@ Future<void> backgroundNotificationHandler() async {
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 
-        if (timestamp == null) continue;
+        if (timestamp == null) {
+          continue;
+        }
 
         final expirationTime = timestamp.toDate().add(
               const Duration(minutes: 5),
@@ -283,7 +278,9 @@ Future<void> backgroundNotificationHandler() async {
   }
 
   final notificationEnabled = prefs.getBool('notification_sound') ?? true;
-  if (!notificationEnabled) return;
+  if (!notificationEnabled) {
+    return; // ✅ graffe per lint
+  }
 
   final currentUserIdPrefs = prefs.getString('user_id') ?? '';
   final currentUserIdAuth = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -308,6 +305,20 @@ Future<void> backgroundNotificationHandler() async {
   final lastRunTime = prefs.getInt('lastRunTime') ?? 0;
   final lastRunDateTime = DateTime.fromMillisecondsSinceEpoch(lastRunTime);
 
+  // 🆕 Carica la lista bloccati del current user (per filtrare le notifiche)
+  Set<String> blocked = {};
+  if (currentUserId.isNotEmpty) {
+    try {
+      final userSnap =
+          await firestore.collection('utenti').doc(currentUserId).get();
+      final List<dynamic> b =
+          (userSnap.data()?['id_bloccati'] as List<dynamic>?) ?? const [];
+      blocked = b.map((e) => e.toString()).toSet();
+    } catch (e) {
+      debugPrint('⚠️ [BACKGROUND] Impossibile leggere id_bloccati: $e');
+    }
+  }
+
   try {
     final messages = await firestore
         .collection('messages')
@@ -324,7 +335,22 @@ Future<void> backgroundNotificationHandler() async {
       final data = doc.data();
       final senderId = data['senderId'] as String? ?? '';
 
-      if (senderId == currentUserId) continue;
+      if (senderId == currentUserId) {
+        continue;
+      }
+
+      // 🆕 Filtra: non notificare se HO BLOCCATO il mittente
+      if (blocked.contains(senderId)) {
+        continue;
+      }
+
+      // 🆕 Filtra: non notificare se SONO in invisibleTo di quel messaggio
+      final List<dynamic> invDyn =
+          (data['invisibleTo'] as List<dynamic>?) ?? const [];
+      final Set<String> invisibleTo = invDyn.map((e) => e.toString()).toSet();
+      if (currentUserId.isNotEmpty && invisibleTo.contains(currentUserId)) {
+        continue;
+      }
 
       if (lastLatitude != null && lastLongitude != null) {
         final messageLat = data['latitude'] as double? ?? 0.0;
@@ -349,7 +375,7 @@ Future<void> backgroundNotificationHandler() async {
           final String type = (data['type'] as String?) ?? 'voice';
           final bool isText = type == 'text';
 
-          notificationService.showNewMessageNotification(
+          await notificationService.showNewMessageNotification(
             category: category,
             messageId: doc.id,
             isText: isText,
@@ -358,7 +384,7 @@ Future<void> backgroundNotificationHandler() async {
       }
     }
 
-    prefs.setInt('lastRunTime', now.millisecondsSinceEpoch);
+    await prefs.setInt('lastRunTime', now.millisecondsSinceEpoch);
   } catch (e) {
     debugPrint('❌ Errore notifiche: $e');
   }
@@ -400,12 +426,10 @@ class LoginScreen extends StatelessWidget {
                 final user = await authService.signInWithGoogle();
                 if (user == null) {
                   debugPrint("❌ Accesso Google fallito");
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Accesso fallito. Riprova.')),
-                    );
-                  }
+                  if (!context.mounted) return; // ✅ lint guard
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Accesso fallito. Riprova.')),
+                  );
                 } else {
                   debugPrint("✅ Accesso Google riuscito, navigazione...");
                 }
@@ -520,13 +544,20 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       _customEnum; // valore enum per la categoria personalizzata (se presente)
   final Map<String, String> _msgCustomNames = {}; // idMsg -> nome custom su doc
 
+  // 🆕🆕 BLOCCO: stato runtime degli utenti bloccati (sincronizzato live)
+  Set<String> _blockedIds = {}; // UID bloccati
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _userDocSub; // listener sul mio doc utente (tipizzato)
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
     _textController.addListener(() {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     });
 
     _loadSettings();
@@ -545,6 +576,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     _countdownTimer?.cancel();
     _longPressTimer?.cancel();
     _gpsUpdateTimer?.cancel();
+
+    _userDocSub?.cancel(); // 🆕 stop listener id_bloccati
 
     _textController.dispose();
 
@@ -573,7 +606,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       final isFirstLaunch = prefs.getBool('first_launch') ?? true;
       _showWelcomeMessage = isFirstLaunch;
-      if (isFirstLaunch) prefs.setBool('first_launch', false);
+      if (isFirstLaunch) {
+        prefs.setBool('first_launch', false);
+      }
 
       // 🆕 Categoria personalizzata: carica nome scelto
       final rawName = (prefs.getString('custom_category_name') ?? '').trim();
@@ -596,6 +631,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
       await _loadUserData();
+      _attachUserDocListener(); // 🆕 inizia a seguire la mia lista bloccati in tempo reale
     }
   }
 
@@ -613,19 +649,31 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       _customEnum != null && c.name == _customEnum!.name;
 
   bool _matchesMyCustomName(VoiceMessage m) {
-    if (_customEnum == null) return true;
-    if (m.category.name != _customEnum!.name) return true;
+    if (_customEnum == null) {
+      return true;
+    }
+    if (m.category.name != _customEnum!.name) {
+      return true;
+    }
     final myName = (_customCategoryName ?? '').trim();
-    if (myName.isEmpty) return false;
+    if (myName.isEmpty) {
+      return false;
+    }
     final msgName =
         (_msgCustomNames[m.id] ?? m.customCategoryName ?? '').trim();
     return msgName.isNotEmpty && msgName.toLowerCase() == myName.toLowerCase();
   }
 
   bool _requireCustomNameOrWarn() {
-    if (_customEnum == null) return true;
-    if (_selectedCategory.name != _customEnum!.name) return true;
-    if ((_customCategoryName ?? '').trim().isNotEmpty) return true;
+    if (_customEnum == null) {
+      return true;
+    }
+    if (_selectedCategory.name != _customEnum!.name) {
+      return true;
+    }
+    if ((_customCategoryName ?? '').trim().isNotEmpty) {
+      return true;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
@@ -637,14 +685,21 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _loadUserData() async {
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('utenti')
-          .doc(_currentUserId!)
-          .get();
+      // ✅ Tipizzo lo snapshot per evitare cast non necessari
+      final DocumentSnapshot<Map<String, dynamic>> userDoc =
+          await FirebaseFirestore.instance
+              .collection('utenti')
+              .doc(_currentUserId!)
+              .get();
 
       if (userDoc.exists) {
+        final data = userDoc.data();
         setState(() {
-          _currentUserData = userDoc.data() as Map<String, dynamic>;
+          _currentUserData = data;
+          // 🆕 leggi id_bloccati
+          final List<dynamic> b =
+              (data?['id_bloccati'] as List<dynamic>?) ?? const [];
+          _blockedIds = b.map((e) => e.toString()).toSet();
         });
         debugPrint("✅ Dati utente caricati: $_currentUserData");
       } else {
@@ -653,6 +708,27 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     } catch (e) {
       debugPrint('❌ Errore caricamento dati utente: $e');
     }
+  }
+
+  // 🆕 Listener realtime del mio documento utente per tenere aggiornata la lista bloccati
+  void _attachUserDocListener() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? _currentUserId;
+    if (uid == null || uid.isEmpty) {
+      return;
+    }
+    _userDocSub?.cancel();
+    _userDocSub = FirebaseFirestore.instance
+        .collection('utenti')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final data = snap.data() ?? <String, dynamic>{};
+      final List<dynamic> b =
+          (data['id_bloccati'] as List<dynamic>?) ?? const [];
+      setState(() {
+        _blockedIds = b.map((e) => e.toString()).toSet();
+      });
+    });
   }
 
   @override
@@ -685,7 +761,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   void _startGpsTimer() {
     _gpsUpdateTimer?.cancel();
     _gpsUpdateTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
-      if (_isAppInForeground) _getCurrentLocation();
+      if (_isAppInForeground) {
+        _getCurrentLocation();
+      }
     });
   }
 
@@ -702,11 +780,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   void _startTimers() {
     _cleanupTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      if (!_isDisposed) _cleanupOldMessages();
+      if (!_isDisposed) {
+        _cleanupOldMessages();
+      }
     });
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isDisposed) setState(() {});
+      if (!_isDisposed) {
+        setState(() {});
+      }
     });
   }
 
@@ -736,10 +818,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       }
 
       if (_currentUserId != null && _currentUserId!.isNotEmpty) {
-        final snap = await FirebaseFirestore.instance
-            .collection('utenti')
-            .doc(_currentUserId!)
-            .get();
+        final DocumentSnapshot<Map<String, dynamic>> snap =
+            await FirebaseFirestore.instance
+                .collection('utenti')
+                .doc(_currentUserId!)
+                .get();
         final nome = snap.data()?['nome'];
         if (nome is String && nome.trim().isNotEmpty) {
           return nome.trim();
@@ -748,10 +831,14 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       final authName =
           FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
-      if (authName.isNotEmpty) return authName;
+      if (authName.isNotEmpty) {
+        return authName;
+      }
 
       final email = FirebaseAuth.instance.currentUser?.email?.trim() ?? '';
-      if (email.isNotEmpty) return email.split('@').first;
+      if (email.isNotEmpty) {
+        return email.split('@').first;
+      }
 
       return 'Anonimo';
     } catch (_) {
@@ -759,13 +846,16 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  Future<void> _ensureMessageHasName(DocumentSnapshot doc) async {
+  Future<void> _ensureMessageHasName(
+      DocumentSnapshot<Map<String, dynamic>> doc) async {
     try {
-      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final data = doc.data() ?? <String, dynamic>{};
       final hasName = (data['name'] as String?)?.trim().isNotEmpty == true;
       final senderId = (data['senderId'] as String?) ?? '';
 
-      if (hasName || senderId.isEmpty) return;
+      if (hasName || senderId.isEmpty) {
+        return;
+      }
 
       final userSnap = await FirebaseFirestore.instance
           .collection('utenti')
@@ -784,13 +874,16 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  void _processFirestoreSnapshot(QuerySnapshot snapshot) {
+  void _processFirestoreSnapshot(QuerySnapshot snapshotRaw) {
+    // Tipizzo correttamente i documenti per evitare cast superflui
+    final snapshot = snapshotRaw as QuerySnapshot<Map<String, dynamic>>;
+
     final now = DateTime.now();
     final newMessages = <VoiceMessage>[];
     final removedMessages = <String>[];
     final updatedMessages = <VoiceMessage>[];
 
-    for (var doc in snapshot.docs) {
+    for (final doc in snapshot.docs) {
       try {
         _ensureMessageHasName(doc);
 
@@ -799,9 +892,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
         // 🆕 salva il nome custom della categoria per filtri locali
         try {
-          final data = doc.data() as Map<String, dynamic>? ?? {};
+          final data = doc.data();
           final cn = (data['customCategoryName'] as String?)?.trim();
-          if (cn != null && cn.isNotEmpty) _msgCustomNames[doc.id] = cn;
+          if (cn != null && cn.isNotEmpty) {
+            _msgCustomNames[doc.id] = cn;
+          }
         } catch (_) {}
 
         if (isExpired) {
@@ -817,6 +912,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           } else {
             newMessages.add(newMessage);
             if (_notificationSoundEnabled &&
+                !_isHiddenByBlock(newMessage) && // 🆕 non beepare se nascosto
                 _isMessageInRange(newMessage) &&
                 _activeFilters.contains(newMessage.category) &&
                 _matchesMyCustomName(newMessage) &&
@@ -839,19 +935,38 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
         for (final updated in updatedMessages) {
           final index = _messages.indexWhere((m) => m.id == updated.id);
-          if (index != -1) _messages[index] = updated;
+          if (index != -1) {
+            _messages[index] = updated;
+          }
         }
 
-        if (newMessages.isNotEmpty) _messages.addAll(newMessages);
+        if (newMessages.isNotEmpty) {
+          _messages.addAll(newMessages);
+        }
         _messages.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       });
     }
   }
 
+  // 🆕 Utility: stabilisce se un messaggio va nascosto per via dei blocchi
+  bool _isHiddenByBlock(VoiceMessage m) {
+    final myUid =
+        FirebaseAuth.instance.currentUser?.uid ?? _currentUserId ?? '';
+    if (_blockedIds.contains(m.senderId)) {
+      return true; // io ho bloccato lui -> non lo vedo
+    }
+    if (myUid.isNotEmpty && m.invisibleTo.contains(myUid)) {
+      return true; // lui mi ha “invisibilizzato”
+    }
+    return false;
+  }
+
   Future<void> _resetRecorder() async {
     try {
       if (_recorder != null) {
-        if (_recorder!.isRecording) await _recorder!.stopRecorder();
+        if (_recorder!.isRecording) {
+          await _recorder!.stopRecorder();
+        }
         await _recorder!.closeRecorder();
         await Future.delayed(const Duration(milliseconds: 200));
         await _recorder!.openRecorder();
@@ -874,7 +989,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _getCurrentLocation() async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
@@ -914,17 +1029,23 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _cleanupOldMessages() async {
-    if (_isDisposed) return;
+    if (_isDisposed) {
+      return; // ✅ graffe per lint
+    }
 
     final now = DateTime.now();
     final messagesToRemove = <VoiceMessage>[];
 
     for (final message in _messages) {
       final elapsedMinutes = now.difference(message.timestamp).inMinutes;
-      if (elapsedMinutes >= 5) messagesToRemove.add(message);
+      if (elapsedMinutes >= 5) {
+        messagesToRemove.add(message);
+      }
     }
 
-    if (messagesToRemove.isEmpty) return;
+    if (messagesToRemove.isEmpty) {
+      return; // ✅ graffe per lint
+    }
 
     for (final message in messagesToRemove) {
       try {
@@ -948,7 +1069,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           }
         }
 
-        await _firestoreMessages.doc(message.id).delete();
+        await FirebaseFirestore.instance
+            .collection('messages')
+            .doc(message.id)
+            .delete();
         debugPrint('✅ Metadati Firestore cancellati');
 
         if (!_isDisposed) {
@@ -961,12 +1085,16 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _startRecording() async {
-    if (!_isInitialized || _recorder == null || _isRecording) return;
+    if (!_isInitialized || _recorder == null || _isRecording) {
+      return; // ✅ graffe per lint
+    }
 
     try {
       await _resetRecorder();
       final permission = await Permission.microphone.request();
-      if (!permission.isGranted) return;
+      if (!permission.isGranted) {
+        return; // ✅ graffe per lint
+      }
 
       if (_isPlaying) {
         await _player!.stopPlayer();
@@ -1005,7 +1133,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (!_isDisposed && _isRecording) {
           setState(() => _recordingSeconds++);
-          if (_recordingSeconds >= 15) _stopRecording();
+          if (_recordingSeconds >= 15) {
+            _stopRecording();
+          }
         }
       });
     } catch (e) {
@@ -1019,7 +1149,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _stopRecording() async {
-    if (!_isRecording || _recorder == null) return;
+    if (!_isRecording || _recorder == null) {
+      return; // ✅ graffe per lint
+    }
 
     try {
       // 🆕 Se selezionata "custom" ma non impostato il nome, blocca invio
@@ -1075,8 +1207,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             'viewedBy': <String>[],
             'name': senderName,
             'text': null,
+            // 🆕 Chi ho bloccato non deve vedere i miei NUOVI messaggi
+            'invisibleTo': _blockedIds.toList(),
           };
-          await _firestoreMessages.add(payload);
+          await FirebaseFirestore.instance.collection('messages').add(payload);
         } catch (e) {
           debugPrint('❌ Errore salvataggio messaggio: $e');
           try {
@@ -1107,10 +1241,14 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _sendTextMessage() async {
     final raw = _textController.text.trim();
-    if (raw.isEmpty) return;
+    if (raw.isEmpty) {
+      return; // ✅ graffe per lint
+    }
 
     // 🆕 Blocca invio se custom senza nome impostato
-    if (!_requireCustomNameOrWarn()) return;
+    if (!_requireCustomNameOrWarn()) {
+      return; // ✅ graffe per lint
+    }
 
     if (raw.characters.length > 250) {
       _textController.text = raw.characters.take(250).toString();
@@ -1143,15 +1281,19 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         'viewedBy': <String>[],
         'name': senderName,
         'text': _textController.text.trim(),
+        // 🆕 Chi ho bloccato non deve vedere i miei NUOVI messaggi
+        'invisibleTo': _blockedIds.toList(),
       };
 
-      await _firestoreMessages.add(payload);
+      await FirebaseFirestore.instance.collection('messages').add(payload);
 
       _textController.clear();
     } catch (e) {
       debugPrint('❌ Errore invio testo: $e');
     } finally {
-      if (mounted) setState(() => _isSendingText = false);
+      if (mounted) {
+        setState(() => _isSendingText = false);
+      }
     }
   }
 
@@ -1159,10 +1301,21 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     final now = DateTime.now();
     final list = _messages.where((m) {
       final expired = now.difference(m.timestamp).inMinutes >= 5;
-      if (expired) return false;
-      if (!_isMessageInRange(m)) return false;
-      if (!_activeFilters.contains(m.category)) return false;
-      if (!_matchesMyCustomName(m)) return false;
+      if (expired) {
+        return false;
+      }
+      if (_isHiddenByBlock(m)) {
+        return false; // 🆕 filtro blocco
+      }
+      if (!_isMessageInRange(m)) {
+        return false;
+      }
+      if (!_activeFilters.contains(m.category)) {
+        return false;
+      }
+      if (!_matchesMyCustomName(m)) {
+        return false;
+      }
       return true;
     }).toList();
 
@@ -1171,7 +1324,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _playNextAfter(String justPlayedId) async {
-    if (_isDisposed) return;
+    if (_isDisposed) {
+      return; // ✅ graffe per lint
+    }
     final playable = _getPlayableMessages();
     final idx = playable.indexWhere((m) => m.id == justPlayedId);
 
@@ -1194,15 +1349,21 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _playMessageInternal(VoiceMessage message,
       {bool fromAuto = false}) async {
-    if (_player == null) return;
+    if (_player == null) {
+      return; // ✅ graffe per lint
+    }
 
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
     final String? myUid = (currentUid != null && currentUid.isNotEmpty)
         ? currentUid
         : _currentUserId;
-    if (myUid == null || myUid.isEmpty) return;
+    if (myUid == null || myUid.isEmpty) {
+      return; // ✅ graffe per lint
+    }
 
-    if (message.isText) return;
+    if (message.isText) {
+      return; // ✅ graffe per lint
+    }
 
     final bool alreadyViewed = message.viewedBy.contains(myUid);
 
@@ -1235,7 +1396,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         try {
           audioPath = await storjService.downloadFile(message.storjObjectKey);
           message.localPath = audioPath;
-          if (!_isDisposed) setState(() {});
+          if (!_isDisposed) {
+            setState(() {});
+          }
         } catch (e) {
           debugPrint('❌ Errore download audio: $e');
           return;
@@ -1245,7 +1408,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       await _player!.startPlayer(
         fromURI: audioPath,
         whenFinished: () {
-          if (_isDisposed) return;
+          if (_isDisposed) {
+            return; // ✅ graffe per lint
+          }
           Future.microtask(() => _playNextAfter(message.id));
         },
       );
@@ -1259,7 +1424,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       if (message.senderId != myUid && !alreadyViewed) {
         try {
-          await _firestoreMessages.doc(message.id).update({
+          await FirebaseFirestore.instance
+              .collection('messages')
+              .doc(message.id)
+              .update({
             'views': FieldValue.increment(1),
             'viewedBy': FieldValue.arrayUnion([myUid]),
           });
@@ -1285,7 +1453,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   bool _isMessageInRange(VoiceMessage message) {
-    if (_currentPosition == null) return true;
+    if (_currentPosition == null) {
+      return true; // ✅ graffe per lint
+    }
     final distance = Geolocator.distanceBetween(
       _currentPosition!.latitude,
       _currentPosition!.longitude,
@@ -1333,24 +1503,36 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   // NEW: marca "letto" per TESTO quando la bolla è visibile
   Future<void> _markTextMessageViewed(VoiceMessage message) async {
-    if (!message.isText) return;
+    if (!message.isText) {
+      return; // ✅ graffe per lint
+    }
 
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
     final String? myUid = (currentUid != null && currentUid.isNotEmpty)
         ? currentUid
         : _currentUserId;
 
-    if (myUid == null || myUid.isEmpty) return;
-    if (message.senderId == myUid) return;
-    if (message.viewedBy.contains(myUid)) return;
-    if (_textSeenOnce.contains(message.id)) return;
+    if (myUid == null || myUid.isEmpty) {
+      return; // ✅ graffe per lint
+    }
+    if (message.senderId == myUid) {
+      return; // ✅ graffe per lint
+    }
+    if (message.viewedBy.contains(myUid)) {
+      return; // ✅ graffe per lint
+    }
+    if (_textSeenOnce.contains(message.id)) {
+      return; // ✅ graffe per lint
+    }
 
     _textSeenOnce.add(message.id);
 
     try {
       await FirebaseFirestore.instance.runTransaction((txn) async {
-        final docRef = _firestoreMessages.doc(message.id);
+        final docRef =
+            FirebaseFirestore.instance.collection('messages').doc(message.id);
         final snap = await txn.get(docRef);
+        // ignore: unnecessary_cast
         final data = snap.data() as Map<String, dynamic>? ?? {};
 
         final List<dynamic> viewedByDyn =
@@ -1386,14 +1568,20 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         ? currentUid
         : _currentUserId;
 
-    if (myUid == null || myUid.isEmpty) return;
+    if (myUid == null || myUid.isEmpty) {
+      return; // ✅ graffe per lint
+    }
 
     try {
       await FirebaseFirestore.instance.runTransaction((txn) async {
-        final docRef = _firestoreMessages.doc(message.id);
+        final docRef =
+            FirebaseFirestore.instance.collection('messages').doc(message.id);
         final snap = await txn.get(docRef);
-        if (!snap.exists) return;
+        if (!snap.exists) {
+          return; // ✅ graffe per lint
+        }
 
+        // ignore: unnecessary_cast
         final data = (snap.data() as Map<String, dynamic>? ?? {});
         final Map<String, dynamic> rxRaw =
             (data['reactions'] as Map<String, dynamic>?) ?? {};
@@ -1417,11 +1605,77 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
+  // 🆕 Blocca utente (scrive nel mio doc `id_bloccati`)
+  Future<void> _blockUserById(String targetUid) async {
+    final myUid =
+        FirebaseAuth.instance.currentUser?.uid ?? _currentUserId ?? '';
+    if (targetUid.isEmpty || myUid.isEmpty || targetUid == myUid) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Operazione non valida.')),
+        );
+      }
+      return;
+    }
+    try {
+      await FirebaseFirestore.instance.collection('utenti').doc(myUid).set({
+        'id_bloccati': FieldValue.arrayUnion([targetUid])
+      }, SetOptions(merge: true));
+
+      setState(() => _blockedIds = {..._blockedIds, targetUid});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Utente bloccato.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Errore durante il blocco.')),
+        );
+      }
+    }
+  }
+
+  // 🆕 Conferma blocco dal long-press sulla nuvoletta
+  Future<void> _confirmAndBlock(VoiceMessage m) async {
+    final targetUid = m.senderId;
+    if (targetUid.isEmpty) {
+      return; // ✅ graffe per lint
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.block, color: Colors.red),
+        title: const Text('Blocca utente'),
+        content: const Text("Vuoi davvero bloccare questo utente?\n\n"
+            "• Non vedrai più nessun suo messaggio\n"
+            "• Lui non vedrà più nessun tuo messaggio"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('ANNULLA')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('BLOCCA'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      await _blockUserById(targetUid);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final filteredMessages = _messages.where((message) {
       return !(now.difference(message.timestamp).inMinutes >= 5) &&
+          !_isHiddenByBlock(message) && // 🆕 filtro blocco
           _isMessageInRange(message) &&
           _activeFilters.contains(message.category) &&
           _matchesMyCustomName(message);
@@ -1500,7 +1754,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             }),
             onSettingsPressed: () async {
               await Navigator.pushNamed(context, '/settings');
+              if (!mounted) return; // ✅ lint guard
               await _loadSettings();
+              if (!mounted) return; // ✅ lint guard
               setState(() {});
             },
             onProfilePressed: _refreshAndToggleUserInfo,
@@ -1525,7 +1781,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 ? 'Max 250 caratteri'
                 : '',
             onSendText: () {
-              if (canSend) _sendTextMessage();
+              if (canSend) {
+                _sendTextMessage();
+              }
             },
 
             // Visibilità testo (per conteggio "visto")
@@ -1533,10 +1791,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
             // Reazioni
             onToggleReaction: (m, emoji) => _toggleReaction(m, emoji),
+
+            // 🆕 Blocca utente: long-press sulla nuvoletta
+            onRequestBlockUser: _confirmAndBlock,
           ),
 
           // Pannello profilo (non se c'è il welcome)
-          if (!_showWelcomeMessage && _showUserInfo && _currentUserData != null)
+          if (!_showWelcomeMessage && _currentUserData != null && _showUserInfo)
             Positioned(
               top: 60,
               right: 10,
@@ -1645,13 +1906,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       onPressed: () async {
                         final authService = AuthService();
                         await authService.signOut();
-                        if (context.mounted) {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => const AuthWrapper()),
-                          );
-                        }
+                        if (!context.mounted) return; // ✅ lint guard
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => const AuthWrapper()),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
@@ -1727,7 +1987,7 @@ class AgeGateWrapper extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        final data = snap.data?.data() ?? const <String, dynamic>{};
+        final data = snap.data?.data() ?? <String, dynamic>{};
         final ts = data[UserProfileKeys.dataDiNascita] as Timestamp?;
 
         if (ts == null) {
@@ -1806,12 +2066,16 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
     } catch (e) {
       setState(() => _error = AgeGateStrings.errors.generic);
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
   String _formatDob(DateTime? d) {
-    if (d == null) return AgeGateStrings.datePlaceholder;
+    if (d == null) {
+      return AgeGateStrings.datePlaceholder;
+    }
     final y = d.year.toString().padLeft(4, '0');
     final m = d.month.toString().padLeft(2, '0');
     final day = d.day.toString().padLeft(2, '0');
@@ -1895,14 +2159,12 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                   TextButton(
                     onPressed: () async {
                       await AuthService().signOut();
-                      if (context.mounted) {
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const AuthWrapper()),
-                          (_) => false,
-                        );
-                      }
+                      if (!context.mounted) return; // ✅ lint guard
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const AuthWrapper()),
+                        (_) => false,
+                      );
                     },
                     child: const Text(AgeGateStrings.logout),
                   ),
@@ -1954,8 +2216,8 @@ Future<bool> _checkAppVersion() async {
         .get();
 
     if (doc.exists) {
-      final data = doc.data()!;
-      final dynamic versionData = data['version'];
+      final data = doc.data();
+      final dynamic versionData = data?['version'];
       String? serverVersion;
 
       if (versionData is String) {
@@ -1973,8 +2235,12 @@ Future<bool> _checkAppVersion() async {
         for (int i = 0; i < serverParts.length; i++) {
           final serverPart = i < serverParts.length ? serverParts[i] : 0;
           final currentPart = i < currentParts.length ? currentParts[i] : 0;
-          if (serverPart > currentPart) return false;
-          if (serverPart < currentPart) break;
+          if (serverPart > currentPart) {
+            return false;
+          }
+          if (serverPart < currentPart) {
+            break;
+          }
         }
       }
     }
@@ -2006,12 +2272,16 @@ Future<void> _runStartupCleanup() async {
         final objectKey = data['storjObjectKey'] as String? ?? '';
         final timestamp = data['timestamp'] as Timestamp?;
 
-        if (timestamp == null) continue;
+        if (timestamp == null) {
+          continue; // ✅ graffe per lint
+        }
 
         final expirationTime = timestamp.toDate().add(
               const Duration(minutes: 5),
             );
-        if (DateTime.now().isBefore(expirationTime)) continue;
+        if (DateTime.now().isBefore(expirationTime)) {
+          continue; // ✅ graffe per lint
+        }
 
         debugPrint('🗑️ [STARTUP] Cancellazione messaggio scaduto: ${doc.id}');
 
@@ -2061,7 +2331,7 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
   if (prefs.getInt('lastRunTime') == null) {
-    prefs.setInt('lastRunTime', DateTime.now().millisecondsSinceEpoch);
+    await prefs.setInt('lastRunTime', DateTime.now().millisecondsSinceEpoch);
   }
 
   await Workmanager().registerPeriodicTask(
