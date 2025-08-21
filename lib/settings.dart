@@ -1,17 +1,4 @@
 // lib/settings.dart
-//
-// ✅ Mostra SOLO il NOME nella lista “Utenti bloccati” (mai ID).
-// ✅ NON tocca la tua logica di blocco/sblocco (quella rimane dove già funziona).
-// ✅ Niente letture/scritture su altri profili in `utenti/*` (evita PERMISSION_DENIED).
-// ✅ Risoluzione nomi: legge SOLO dalla collezione pubblica `messages` (campo denormalizzato `name`),
-//    con una singola query globale (orderBy timestamp) e poi mappa i senderId → name.
-// ✅ UI stabile: cache RAM per impedire flicker “Anonimo”↔nome. Fallback “Anonimo” solo se davvero non trovato.
-// ✅ Nessuna scrittura di `blocked_names` o simili su Firestore (evita errori di regole).
-// ✅ Correttezza null-safety (niente “String?” dove serve “String”).
-//
-// COPIA e INCOLLA per SOSTITUIRE INTERAMENTE il tuo file lib/settings.dart
-//
-
 import 'dart:async';
 import 'dart:io';
 
@@ -23,59 +10,57 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_constants.dart';
+import 'app_theme.dart';
 
-/// Piccolo modello solo per la UI della lista bloccati.
+// Piccolo modello per la UI della lista bloccati.
 class BlockedUser {
-  final String uid; // sempre non-vuoto
-  final String name; // sempre non-vuoto nella UI
-  final String? photoUrl; // opzionale, non usata ora
+  final String uid;
+  final String name;
+  final String? photoUrl;
 
-  BlockedUser({
-    required this.uid,
-    required this.name,
-    this.photoUrl,
-  });
+  BlockedUser({required this.uid, required this.name, this.photoUrl});
 }
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
-
   @override
   SettingsScreenState createState() => SettingsScreenState();
 }
 
 class SettingsScreenState extends State<SettingsScreen> {
-  // ------------------- Notifiche / Permessi -------------------
+  // Notifiche / Permessi
   bool _notificationSoundEnabled = true;
   bool _notificationPermissionGranted = false;
   bool _isBatteryUnrestricted = false;
   bool _locationPermissionGranted = false;
 
-  // 🏷️ Categoria personalizzata (SharedPreferences)
+  // Tema
+  AppTheme _currentTheme = AppTheme.light;
+
+  // Categoria personalizzata
   String? _customCategoryName;
 
-  // ---------------------- Firestore / Auth ---------------------
+  // Firestore / Auth
   final _auth = FirebaseAuth.instance;
   final _fs = FirebaseFirestore.instance;
 
   String? _myUid;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _myDocSub;
 
-  // ------------------------- Bloccati --------------------------
+  // Bloccati
   bool _loadingBlocked = true;
   List<BlockedUser> _blockedUsers = [];
-
-  // Cache VOLATILE (RAM): uid -> name (stabilizza UI, niente flicker)
   final Map<String, String> _volatileNameCache = {};
 
   @override
   void initState() {
     super.initState();
+    _currentTheme = AppThemeController.instance.theme;
     _loadSettings();
     _checkNotificationPermission();
     _checkBatteryOptimization();
     _checkLocationPermission();
-    _attachBlockedListener(); // costruisce e aggiorna la lista “Utenti bloccati”
+    _attachBlockedListener();
   }
 
   @override
@@ -202,10 +187,9 @@ class SettingsScreenState extends State<SettingsScreen> {
   // ----------------- Listener su `utenti/<me>` -----------------
   Future<void> _attachBlockedListener() async {
     final prefs = await SharedPreferences.getInstance();
-    final authUid = _auth.currentUser?.uid; // String?
+    final authUid = _auth.currentUser?.uid;
     final prefsUid = prefs.getString('user_id') ?? '';
 
-    // Ricava il mio UID con fallback
     late final String myUid;
     if (authUid != null && authUid.isNotEmpty) {
       myUid = authUid;
@@ -232,13 +216,11 @@ class SettingsScreenState extends State<SettingsScreen> {
         _fs.collection('utenti').doc(myUid).snapshots().listen((snap) async {
       final data = snap.data() ?? <String, dynamic>{};
 
-      // Lista di UID bloccati (escludi me stesso)
       final rawIds = (data['id_bloccati'] as List<dynamic>?) ?? const [];
       final blockedIds =
           rawIds.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet();
       blockedIds.remove(myUid);
 
-      // UI immediata: usa cache se presente, altrimenti "Anonimo" come placeholder
       final initial = blockedIds
           .map((uid) => BlockedUser(
                 uid: uid,
@@ -254,12 +236,8 @@ class SettingsScreenState extends State<SettingsScreen> {
         _loadingBlocked = false;
       });
 
-      // 🔥 BACKFILL NOMI da `messages` con UNA SOLA QUERY GLOBALE
-      //    (niente where su senderId → meno rischio regole/indici; prestazioni ok con limit)
       await _backfillNamesFromRecentMessages(blockedIds);
     }, onError: (e) {
-      // Se non riesci a leggere il tuo doc (strano, ma gestiamo)
-      debugPrint('⚠️ Listener utente fallito: $e');
       if (!mounted) return;
       setState(() {
         _loadingBlocked = false;
@@ -268,52 +246,43 @@ class SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  /// Legge un batch di messaggi recenti e costruisce una mappa senderId → name,
-  /// aggiornando la cache e la UI SOLO per gli UID bloccati che mancano.
   Future<void> _backfillNamesFromRecentMessages(Set<String> targetUids) async {
     if (targetUids.isEmpty) return;
 
-    // Filtra chi manca davvero in cache (riduce lavoro e re-render)
     final missing = targetUids
         .where((uid) => (_volatileNameCache[uid] ?? '').isEmpty)
         .toSet();
     if (missing.isEmpty) return;
 
     try {
-      // Prendiamo gli ultimi N messaggi e ricaviamo i nomi (denormalizzati su `messages.name`)
-      // N = 500 è ragionevole per una bacheca locale; aumenta se serve.
       final q = await _fs
           .collection('messages')
           .orderBy('timestamp', descending: true)
           .limit(500)
           .get();
 
-      // Costruisci una mappa temporanea: uid → name trovato
       final Map<String, String> found = {};
       for (final d in q.docs) {
         final m = d.data();
         final sid = (m['senderId'] as String?) ?? '';
-        if (!missing.contains(sid)) continue; // non ci interessa
-        if (found.containsKey(sid)) continue; // già trovato
+        if (!missing.contains(sid)) continue;
+        if (found.containsKey(sid)) continue;
 
         final rawName = (m['name'] as String?)?.trim() ?? '';
-        // Consideriamo valido solo un nome non vuoto e diverso da "Anonimo"
         if (rawName.isNotEmpty && rawName.toLowerCase() != 'anonimo') {
           found[sid] = rawName;
-          if (found.length == missing.length) break; // abbiamo tutto
+          if (found.length == missing.length) break;
         }
       }
 
-      if (found.isEmpty) return; // niente da aggiornare
+      if (found.isEmpty) return;
 
-      // Aggiorna cache e UI
       found.forEach((uid, name) {
         _volatileNameCache[uid] = name;
       });
 
       if (!mounted) return;
       setState(() {
-        // Rimpiazza eventuali placeholder con i nomi trovati
         _blockedUsers = _blockedUsers.map((u) {
           final cached = _volatileNameCache[u.uid];
           if (cached != null && cached.isNotEmpty) {
@@ -324,17 +293,12 @@ class SettingsScreenState extends State<SettingsScreen> {
           ..sort(
               (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       });
-    } catch (e) {
-      // Nessun crash: se fallisce, resta “Anonimo”
-      debugPrint('ℹ️ Backfill nomi da messages fallito: $e');
-    }
+    } catch (_) {/* Ignore */}
   }
 
-  // ------------------------- Sblocca utente --------------------
   Future<void> _unblockUser(BlockedUser u) async {
     if (_myUid == null || _myUid!.isEmpty) return;
     try {
-      // UI ottimistica
       setState(() {
         _blockedUsers = _blockedUsers.where((x) => x.uid != u.uid).toList();
       });
@@ -348,7 +312,6 @@ class SettingsScreenState extends State<SettingsScreen> {
         SnackBar(content: Text('Hai sbloccato ${u.name}')),
       );
     } catch (e) {
-      debugPrint('❌ Errore durante lo sblocco: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Errore durante lo sblocco. Riprova.')),
@@ -356,9 +319,7 @@ class SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // --------------------------- Avatar --------------------------
   Widget _avatarFor(BlockedUser u) {
-    // Genera iniziali dal nome (locale, nessun accesso rete)
     String initials = 'A';
     final raw = u.name.trim();
     if (raw.isNotEmpty) {
@@ -379,29 +340,85 @@ class SettingsScreenState extends State<SettingsScreen> {
   // ------------------------------ UI ---------------------------
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Impostazioni'),
-        backgroundColor: Colors.blue[700],
-        foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ---------- Tema ----------
+            Text(
+              'Tema',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: cs.secondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  RadioListTile<AppTheme>(
+                    title: const Text('Light'),
+                    value: AppTheme.light,
+                    groupValue: _currentTheme,
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setState(() => _currentTheme = v);
+                      await AppThemeController.instance.setTheme(v);
+                    },
+                  ),
+                  const Divider(height: 1),
+                  RadioListTile<AppTheme>(
+                    title: const Text('Dark'),
+                    value: AppTheme.dark,
+                    groupValue: _currentTheme,
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setState(() => _currentTheme = v);
+                      await AppThemeController.instance.setTheme(v);
+                    },
+                  ),
+                  const Divider(height: 1),
+                  RadioListTile<AppTheme>(
+                    title: const Text('Grey'),
+                    subtitle: const Text('Palette neutra in chiaro/scuro'),
+                    value: AppTheme.grey,
+                    groupValue: _currentTheme,
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setState(() => _currentTheme = v);
+                      await AppThemeController.instance.setTheme(v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
             // ---------- Notifiche ----------
-            const Text(
+            Text(
               'Gestione Notifiche',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.blueGrey,
+                color: cs.secondary,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -414,16 +431,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                 ),
                 value: _notificationPermissionGranted,
                 onChanged: (_) => _requestNotificationPermission(),
-                secondary: Icon(
-                  Icons.notifications,
-                  color: _notificationPermissionGranted
-                      ? Colors.blue
-                      : Colors.grey,
-                ),
+                secondary: const Icon(Icons.notifications),
               ),
             ),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -434,14 +446,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                 ),
                 value: _notificationSoundEnabled,
                 onChanged: _setNotificationSound,
-                secondary: Icon(
-                  Icons.notifications_active,
-                  color: _notificationSoundEnabled ? Colors.blue : Colors.grey,
-                ),
+                secondary: const Icon(Icons.notifications_active),
               ),
             ),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -454,35 +463,32 @@ class SettingsScreenState extends State<SettingsScreen> {
                 ),
                 value: _isBatteryUnrestricted,
                 onChanged: (_) => _requestIgnoreBatteryOptimization(),
-                secondary: Icon(
-                  Icons.battery_alert,
-                  color: _isBatteryUnrestricted ? Colors.blue : Colors.grey,
-                ),
+                secondary: const Icon(Icons.battery_alert),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0),
               child: Text(
-                'Le notifiche in background richiedono che l\'ottimizzazione batteria sia disattivata per questa app.',
-                style: TextStyle(color: Colors.grey, fontSize: 14),
+                'Le notifiche in background richiedono di disattivare l’ottimizzazione batteria per questa app.',
+                style: TextStyle(fontSize: 14),
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
 
             // ---------- GPS ----------
-            const Text(
+            Text(
               'Gestione GPS',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.blueGrey,
+                color: cs.secondary,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -495,27 +501,24 @@ class SettingsScreenState extends State<SettingsScreen> {
                 ),
                 value: _locationPermissionGranted,
                 onChanged: (_) => _requestLocationPermission(),
-                secondary: Icon(
-                  Icons.location_on,
-                  color: _locationPermissionGranted ? Colors.blue : Colors.grey,
-                ),
+                secondary: const Icon(Icons.location_on),
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
 
             // ---------- Categoria personalizzata ----------
-            const Text(
+            Text(
               'Categoria personalizzata',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.blueGrey,
+                color: cs.secondary,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -548,20 +551,20 @@ class SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
 
             // ---------- Utenti bloccati ----------
-            const Text(
+            Text(
               'Utenti bloccati',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.blueGrey,
+                color: cs.secondary,
               ),
             ),
             const SizedBox(height: 12),
             Card(
-              elevation: 3,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -588,7 +591,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                               return ListTile(
                                 leading: _avatarFor(u),
                                 title: Text(
-                                  u.name, // ✅ SOLO nome (mai ID)
+                                  u.name,
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w600),
                                 ),
@@ -606,12 +609,11 @@ class SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
             const Center(
               child: Text(
                 'Versione App: $appVersion',
                 style: TextStyle(
-                  color: Colors.grey,
                   fontStyle: FontStyle.italic,
                 ),
               ),

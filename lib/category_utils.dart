@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // =============================================================================
-// 🔧 Helper: nome categoria personalizzata da SharedPreferences
+//// 🔧 Helper: nome categoria personalizzata da SharedPreferences
 // =============================================================================
 Future<String?> loadCustomCategoryName() async {
   final prefs = await SharedPreferences.getInstance();
@@ -66,6 +66,10 @@ class CategorySelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // MOD: palette dinamica dal tema
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return FutureBuilder<String?>(
       future: loadCustomCategoryName(),
       builder: (context, snap) {
@@ -82,15 +86,21 @@ class CategorySelector extends StatelessWidget {
             margin: const EdgeInsets.symmetric(horizontal: 16),
             padding: const EdgeInsets.fromLTRB(12, 32, 12, 16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              // MOD: niente bianco fisso → surface del tema
+              color: cs.surface,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
+                // ombra leggera; in dark i temi Material3 gestiscono overlay
                 BoxShadow(
-                  color: Colors.black.withAlpha(25),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  // ignore: deprecated_member_use
+                  color: Colors.black.withOpacity(
+                      theme.brightness == Brightness.dark ? 0.35 : 0.10),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
               ],
+              // MOD: bordo tenue coerente col tema
+              border: Border.all(color: cs.outlineVariant, width: 1),
             ),
             child: Stack(
               children: [
@@ -100,23 +110,30 @@ class CategorySelector extends StatelessWidget {
                   child: GestureDetector(
                     onTap: onClose,
                     child: Container(
-                      width: 24,
-                      height: 24,
+                      width: 28,
+                      height: 28,
                       decoration: BoxDecoration(
-                        color: Colors.grey[200],
+                        // MOD: niente grigio fisso → surfaceVariant
+                        color: cs.surfaceContainerHighest,
                         shape: BoxShape.circle,
+                        border: Border.all(color: cs.outlineVariant, width: 1),
                       ),
-                      child: const Icon(Icons.close, size: 16),
+                      child: Icon(Icons.close,
+                          size: 18, color: cs.onSurfaceVariant),
                     ),
                   ),
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Seleziona categoria:',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        // MOD: testo sul tema
+                        color: cs.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SingleChildScrollView(
@@ -128,40 +145,42 @@ class CategorySelector extends StatelessWidget {
                             category,
                             prefsCustomName: customName,
                           );
+
+                          // MOD: colori adattivi per il chip
+                          final Color chipBg = isSelected
+                              ? category.color
+                              : cs.surfaceContainerHighest;
+                          final Color chipBorder =
+                              isSelected ? category.color : cs.outlineVariant;
+                          final Color iconColor =
+                              isSelected ? Colors.white : cs.onSurfaceVariant;
+                          final Color textColor =
+                              isSelected ? Colors.white : cs.onSurface;
+
                           return GestureDetector(
                             onTap: () => onCategorySelected(category),
                             child: Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
+                                  horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
-                                color:
-                                    isSelected ? category.color : Colors.white,
+                                color: chipBg,
                                 borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: category.color,
-                                  width: isSelected ? 2 : 1,
-                                ),
+                                border:
+                                    Border.all(color: chipBorder, width: 1.5),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
-                                    category.icon,
-                                    size: 16,
-                                    color: isSelected
-                                        ? Colors.white
-                                        : category.color,
-                                  ),
-                                  const SizedBox(width: 4),
+                                  Icon(category.icon,
+                                      size: 16, color: iconColor),
+                                  const SizedBox(width: 6),
                                   Text(
                                     label,
                                     style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.white
-                                          : category.color,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
+                                      color: textColor,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
@@ -199,6 +218,10 @@ class FilterSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // MOD: palette dinamica dal tema
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return FutureBuilder<String?>(
       future: loadCustomCategoryName(),
       builder: (context, snap) {
@@ -215,15 +238,19 @@ class FilterSelector extends StatelessWidget {
             margin: const EdgeInsets.symmetric(horizontal: 16),
             padding: const EdgeInsets.fromLTRB(12, 32, 12, 16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              // MOD: niente bianco fisso → surface del tema
+              color: cs.surface,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(25),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  // ignore: deprecated_member_use
+                  color: Colors.black.withOpacity(
+                      theme.brightness == Brightness.dark ? 0.35 : 0.10),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
               ],
+              border: Border.all(color: cs.outlineVariant, width: 1),
             ),
             child: Stack(
               children: [
@@ -233,23 +260,30 @@ class FilterSelector extends StatelessWidget {
                   child: GestureDetector(
                     onTap: onClose,
                     child: Container(
-                      width: 24,
-                      height: 24,
+                      width: 28,
+                      height: 28,
                       decoration: BoxDecoration(
-                        color: Colors.grey[200],
+                        // MOD: niente grigio fisso → surfaceVariant
+                        color: cs.surfaceContainerHighest,
                         shape: BoxShape.circle,
+                        border: Border.all(color: cs.outlineVariant, width: 1),
                       ),
-                      child: const Icon(Icons.close, size: 16),
+                      child: Icon(Icons.close,
+                          size: 18, color: cs.onSurfaceVariant),
                     ),
                   ),
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Filtra messaggi per categoria:',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        // MOD: testo sul tema
+                        color: cs.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     LayoutBuilder(
@@ -268,6 +302,22 @@ class FilterSelector extends StatelessWidget {
                               prefsCustomName: customName,
                             );
 
+                            // MOD: stile adattivo per i “bottoni” filtro
+                            final bg = isActive
+                                ? _blendOn(
+                                    cs.surface,
+                                    category.color,
+                                    theme.brightness == Brightness.dark
+                                        ? 0.28
+                                        : 0.16)
+                                : cs.surfaceContainerHighest;
+                            final borderColor =
+                                isActive ? category.color : cs.outlineVariant;
+                            final iconColor =
+                                isActive ? category.color : cs.onSurfaceVariant;
+                            final textColor =
+                                isActive ? category.color : cs.onSurface;
+
                             return Material(
                               color: Colors.transparent,
                               child: InkWell(
@@ -276,38 +326,25 @@ class FilterSelector extends StatelessWidget {
                                 child: Container(
                                   width: buttonWidth,
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 8),
+                                      horizontal: 10, vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: isActive
-                                        ? category.color.withAlpha(51)
-                                        : Colors.grey[100],
+                                    color: bg,
                                     borderRadius: BorderRadius.circular(16),
                                     border: Border.all(
-                                      color: isActive
-                                          ? category.color
-                                          : Colors.grey[300]!,
-                                      width: isActive ? 1.5 : 1,
-                                    ),
+                                        color: borderColor, width: 1.2),
                                   ),
                                   child: Row(
                                     children: [
-                                      Icon(
-                                        category.icon,
-                                        size: 16,
-                                        color: isActive
-                                            ? category.color
-                                            : Colors.grey[600],
-                                      ),
+                                      Icon(category.icon,
+                                          size: 16, color: iconColor),
                                       const SizedBox(width: 6),
                                       Expanded(
                                         child: Text(
                                           label,
                                           style: TextStyle(
                                             fontSize: 12.5,
-                                            fontWeight: FontWeight.w500,
-                                            color: isActive
-                                                ? category.color
-                                                : Colors.grey[700],
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -329,5 +366,11 @@ class FilterSelector extends StatelessWidget {
         );
       },
     );
+  }
+
+  // MOD: piccolo helper per fondere un colore “accento” con una base (surface)
+  Color _blendOn(Color base, Color overlay, double opacity) {
+    // ignore: deprecated_member_use
+    return Color.alphaBlend(overlay.withOpacity(opacity), base);
   }
 }

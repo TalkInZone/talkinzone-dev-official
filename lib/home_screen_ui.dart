@@ -1,22 +1,29 @@
 // =============================================================================
 // 📦 FILE: home_screen_ui.dart
 // =============================================================================
-// ✅ NOVITÀ DI QUESTA VERSIONE (copia/incolla tutto questo file)
-// - LONG PRESS sulla bolla: mostra SOLO le azioni "Segnala" e "Blocca/Ignora".
-//   👉 NIENTE più reazioni nel long-press (come richiesto).
-// - TAP sulla faccina 🙂 dentro la bolla: apre il selettore reazioni.
-// - "Segnala": ha un fallback interno (dialog + scrittura su `reports/`).
-// - **MODIFICA RICHIESTA:** il box/pill delle reazioni viene spostato di
-//   **+5px a destra SOLO per i messaggi ricevuti** (non miei).
-//   🔎 Vedi il metodo `_showReactionsOverlay(...)` per i commenti dettagliati.
+// ✅ NOVITÀ DI QUESTA VERSIONE
+// - LONG PRESS sulla bolla: SOLO "Segnala" e "Blocca/Ignora".
+// - TAP sulla faccina 🙂: apre il selettore reazioni.
+// - Fallback interno per "Segnala" (scrive su `reports/`).
+// - Overlay reazioni su rootOverlay (sopra tutto).
+// - SHIFT +5px a destra SOLO per messaggi ricevuti (non tuoi).
+// - 🔧 FIX TAGLIO VERTICALE EMOJI nella pill delle reazioni.
+// - 🔒 BLOCCO: usa la callback esterna se c’è; altrimenti fallback interno
+//   con tentativi multipli su path comuni e messaggi d’errore dettagliati.
+//
+// 🛠 [MOD - tap bolla audio] Tap breve su qualsiasi punto della bolla di un
+//     MESSAGGIO AUDIO (ovunque tranne sull’icona reazioni) avvia/stoppa la
+//     riproduzione. Il long-press resta invariato.
 // =============================================================================
 
-import 'dart:math' as math;
 import 'dart:async';
+import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// <<< PATCH BLOCCO: per recuperare l'UID se non arriva dal parent
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'category_utils.dart'
     show
@@ -151,7 +158,6 @@ class HomeScreenUI extends StatefulWidget {
   final void Function(VoiceMessage) onTextVisible;
   final void Function(VoiceMessage, String) onToggleReaction;
 
-  // Callback opzionali esterne (blocco OK, report ha fallback interno)
   final void Function(VoiceMessage message)? onRequestBlockUser;
   final void Function(VoiceMessage message)? onRequestReportUser;
 
@@ -355,6 +361,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     _reactionsOverlay = null;
   }
 
+  // ------------------------ Firestore reazioni ------------------------
   Future<bool> _persistReaction(VoiceMessage message, String newEmoji) async {
     final uid = widget.currentUserId;
     if (uid == null) return false;
@@ -530,72 +537,107 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   }
 
   // ===========================================================================
-  // 🎯 Overlay reazioni (reaction picker)
-  //  - Mostra la pill con le emoji
-  //  - **MODIFICA RICHIESTA**: SHIFT di **+5px SOLO** per i messaggi ricevuti
-  //    (non miei). La logica è commentata nel calcolo della variabile `left`.
-  //  - Clamp orizzontale per non uscire dallo schermo.
+  // 🎯 Overlay reazioni (reaction picker) — con patch anti-taglio
   // ===========================================================================
   void _showReactionsOverlay({
     required BuildContext context,
     required GlobalKey anchorKey,
     required VoiceMessage message,
   }) {
-    // Chiude un eventuale overlay precedente (evita duplicati)
     _hideReactionsOverlay();
-
-    // Feedback aptico gradevole
     HapticFeedback.mediumImpact();
 
-    // Calcola geometrie necessarie per posizionare la pill
+    final overlayState = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlayState == null) {
+      _showReactionsFallbackDialog(context, message);
+      return;
+    }
+
     final RenderBox? box =
         anchorKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderBox? overlayBox =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (box == null || overlayBox == null) return;
-
-    // Offset assoluto (rispetto all'overlay) e dimensioni della bolla messaggio
-    final Offset offset = box.localToGlobal(Offset.zero, ancestor: overlayBox);
-    final Size size = box.size;
-
-    // Emojis disponibili
-    const List<String> emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-
-    // --- POSIZIONAMENTO X ----------------------------------------------------
-    // Stimiamo la "mezza" larghezza della pill (≈ 360px totali → 180px metà)
-    const double kPillHalfWidth = 180.0;
-    const double kPillWidth = kPillHalfWidth * 2;
-
-    // Base: centriamo la pill orizzontalmente rispetto alla bolla messaggio
-    double left = offset.dx + (size.width / 2) - kPillHalfWidth;
-
-    // 🔧 **MODIFICA**: sposta la pill di **+5px verso destra SOLO per i
-    // messaggi *ricevuti* (non sono i miei). Riconosciamo il "ricevuto"
-    // verificando che il senderId sia diverso dall'uid corrente.
-    final bool isReceived = message.senderId != (widget.currentUserId ?? '');
-    if (isReceived) {
-      left += 5.0; // <-- SHIFT desiderato SOLO sui messaggi ricevuti
+        overlayState.context.findRenderObject() as RenderBox?;
+    if (box == null || overlayBox == null) {
+      _showReactionsFallbackDialog(context, message);
+      return;
     }
 
-    // Evita che esca dallo schermo (8px di margine ai lati)
-    const double kSidePadding = 8.0;
-    final double maxLeft = overlayBox.size.width - kPillWidth - kSidePadding;
-    left = left.clamp(kSidePadding, maxLeft);
+    final Offset anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Size anchorSize = box.size;
 
-    // --- POSIZIONAMENTO Y ----------------------------------------------------
-    // Posizioniamo la pill sopra la bolla (64px sopra), con clamp verticale.
-    final double top = (offset.dy - 64).clamp(12.0, double.infinity);
+    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-    // Crea l'overlay
+    const double emojiSize = 22.0;
+    const double emojiPadH = 10.0;
+    const double pillHPadEdge = 20.0;
+    const double pillVPad = 12.0;
+
+    const double pillHeightEstimate = emojiSize + (pillVPad * 2) + 4.0;
+
+    final double neededWidth =
+        (emojis.length * (emojiSize + (emojiPadH * 2))) + (pillHPadEdge * 2);
+    const double sidePadding = 8.0;
+    final double screenWidth = overlayBox.size.width;
+    final double maxWidth = screenWidth - (sidePadding * 2);
+    final double pillWidth = math.min(neededWidth, maxWidth);
+
+    double left = anchor.dx + (anchorSize.width / 2) - (pillWidth / 2);
+    final bool isReceived = message.senderId != (widget.currentUserId ?? '');
+    if (isReceived) left += 5.0;
+    left = left.clamp(sidePadding, screenWidth - pillWidth - sidePadding);
+
+    double top = anchor.dy - pillHeightEstimate - 6.0;
+    top = top.clamp(
+      12.0,
+      overlayBox.size.height - pillHeightEstimate - 12.0,
+    );
+
     _reactionsOverlay = OverlayEntry(
       builder: (_) {
-        // Emoji eventualmente già selezionata dall'utente
-        final String? current =
+        final current =
             _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+
+        Widget emojisStrip() {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: emojis.map((e) {
+                final selected = current == e;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: () async {
+                    HapticFeedback.selectionClick();
+                    if (selected) {
+                      await _applyLocalReactionRemoval(message);
+                      _hideReactionsOverlay();
+                      return;
+                    }
+                    await _applyLocalReaction(message, e);
+                    _hideReactionsOverlay();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: emojiPadH),
+                    child: Opacity(
+                      opacity: selected ? 0.55 : 1.0,
+                      child: Text(
+                        e,
+                        style:
+                            const TextStyle(fontSize: emojiSize, height: 1.2),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          );
+        }
 
         return Stack(
           children: [
-            // Tappando fuori si chiude l'overlay
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -603,18 +645,17 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                 child: const SizedBox.expand(),
               ),
             ),
-
-            // La "pill" delle reazioni
             Positioned(
               left: left,
               top: top,
+              width: pillWidth,
               child: Material(
                 color: Colors.transparent,
                 child: Container(
-                  // Padding interno della pill
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  // Aspetto grafico della pill
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: pillHPadEdge,
+                    vertical: pillVPad,
+                  ),
                   decoration: BoxDecoration(
                     color: _alpha(Colors.black, 0.92),
                     borderRadius: BorderRadius.circular(28),
@@ -623,40 +664,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                         color: Color(0x61000000),
                         blurRadius: 10,
                         offset: Offset(0, 4),
-                      ),
+                      )
                     ],
                   ),
-                  // Riga con le emoji selezionabili
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: emojis.map((e) {
-                      final bool selected = current == e;
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () async {
-                          HapticFeedback.selectionClick();
-                          // Se tocco l'emoji già selezionata → rimuovo la mia reazione
-                          if (selected) {
-                            await _applyLocalReactionRemoval(message);
-                            _hideReactionsOverlay();
-                            return;
-                          }
-                          // Altrimenti applico la nuova reazione
-                          await _applyLocalReaction(message, e);
-                          _hideReactionsOverlay();
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          child: Opacity(
-                            opacity: selected ? 0.55 : 1.0, // feedback visivo
-                            child:
-                                Text(e, style: const TextStyle(fontSize: 24)),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: emojisStrip(),
                 ),
               ),
             ),
@@ -665,8 +677,48 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       },
     );
 
-    // Inserisci l'overlay nello stack dell'app
-    Overlay.of(context).insert(_reactionsOverlay!);
+    overlayState.insert(_reactionsOverlay!);
+  }
+
+  void _showReactionsFallbackDialog(
+      BuildContext context, VoiceMessage message) {
+    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+    final String? current =
+        _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reazioni'),
+        content: Wrap(
+          spacing: 8,
+          children: emojis.map((e) {
+            final selected = current == e;
+            return InkWell(
+              onTap: () async {
+                HapticFeedback.selectionClick();
+                if (selected) {
+                  await _applyLocalReactionRemoval(message);
+                } else {
+                  await _applyLocalReaction(message, e);
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: Opacity(
+                opacity: selected ? 0.55 : 1.0,
+                child: Text(e, style: const TextStyle(fontSize: 22)),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Chiudi'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -988,9 +1040,117 @@ class _MessagesList extends StatelessWidget {
     this.onRequestReportUser,
   });
 
-  // 🆕 Flow di segnalazione (fallback interno se non fornisci un callback)
+  // ------------------------------------------------------------
+  // 🔒 Fallback interno di blocco con tentativi multipli
+  // ------------------------------------------------------------
+  Future<bool> _tryAppendBlocked({
+    required String collection,
+    required String field,
+    required String uid,
+    required String targetId,
+  }) async {
+    await FirebaseFirestore.instance.collection(collection).doc(uid).set({
+      field: FieldValue.arrayUnion([targetId])
+    }, SetOptions(merge: true));
+    return true;
+  }
+
+  Future<void> _blockFlow(BuildContext context, VoiceMessage m) async {
+    // <<< PATCH BLOCCO: recupero UID (prop o FirebaseAuth)
+    final uid = currentUserId ??
+        FirebaseAuth
+            .instance.currentUser?.uid; // può essere null se non loggato
+
+    if (uid == null || uid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Devi essere autenticato per bloccare.')),
+      );
+      return;
+    }
+    if (m.senderId == uid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Non puoi bloccare te stesso.')),
+      );
+      return;
+    }
+    if (m.senderId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ID utente da bloccare non valido.')),
+      );
+      return;
+    }
+
+    final targetName = (m.name).trim().isEmpty ? 'utente' : m.name.trim();
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Blocca/ignora'),
+            content:
+                Text('Non vedrai più i messaggi di $targetName. Confermi?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annulla'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Blocca'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok) return;
+
+    // <<< PATCH BLOCCO: proviamo più percorsi/field comuni
+    final attempts = <({String coll, String field})>[
+      (coll: 'users', field: 'blockedUserIds'),
+      (coll: 'utenti', field: 'id_bloccati'),
+    ];
+
+    FirebaseException? lastErr;
+    for (final a in attempts) {
+      try {
+        await _tryAppendBlocked(
+          collection: a.coll,
+          field: a.field,
+          uid: uid,
+          targetId: m.senderId,
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Utente bloccato (${a.coll}/${a.field}).')),
+          );
+        }
+        return; // successo
+      } on FirebaseException catch (e) {
+        lastErr = e;
+        // continua col prossimo tentativo
+      } catch (e) {
+        // errore generico: interrompi e segnala
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Errore durante il blocco: $e')),
+          );
+        }
+        return;
+      }
+    }
+
+    // Se arriviamo qui, tutti i tentativi Firestore sono falliti
+    if (context.mounted) {
+      final code = lastErr?.code ?? 'sconosciuto';
+      final msg = lastErr?.message ?? lastErr.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Errore durante il blocco [$code]: $msg'),
+        ),
+      );
+    }
+  }
+
+  // 🆘 Flow di segnalazione (fallback interno se non fornisci un callback)
   Future<void> _reportFlow(BuildContext context, VoiceMessage m) async {
-    // Se l'app fornisce un callback esterno, usalo e basta
     if (onRequestReportUser != null) {
       onRequestReportUser!(m);
       return;
@@ -1068,7 +1228,6 @@ class _MessagesList extends StatelessWidget {
     }
   }
 
-  // SOLO azioni Segnala/Blocca sul long-press
   Future<void> _showMessageActions(
     BuildContext context,
     VoiceMessage m,
@@ -1093,7 +1252,6 @@ class _MessagesList extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 🔶 Segnala
               ListTile(
                 leading: const Icon(Icons.flag_outlined, color: Colors.orange),
                 title: isMine
@@ -1108,10 +1266,9 @@ class _MessagesList extends StatelessWidget {
                     ? null
                     : () async {
                         Navigator.pop(ctx);
-                        await _reportFlow(context, m); // <-- Fallback interno
+                        await _reportFlow(context, m);
                       },
               ),
-              // ⛔ Blocca/Ignora (usa la tua logica se passata)
               ListTile(
                 leading: const Icon(Icons.block, color: Colors.redAccent),
                 title: Text(isMine
@@ -1121,20 +1278,20 @@ class _MessagesList extends StatelessWidget {
                     ? const Text('Operazione non consentita')
                     : const Text('Non vedrai più i messaggi di questo utente'),
                 enabled: !isMine,
+                // <<< PATCH BLOCCO: callback esterna se presente; altrimenti fallback multipath
                 onTap: isMine
                     ? null
-                    : () {
+                    : () async {
                         Navigator.pop(ctx);
                         if (onRequestBlockUser != null) {
-                          onRequestBlockUser!(m);
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                  'Azione di blocco non collegata: collega onRequestBlockUser nel parent.'),
-                            ),
-                          );
+                          try {
+                            onRequestBlockUser!(m); // tua logica "storica"
+                            return;
+                          } catch (_) {
+                            // se la callback lancia, prosegui col fallback
+                          }
                         }
+                        await _blockFlow(context, m);
                       },
               ),
               const SizedBox(height: 4),
@@ -1171,8 +1328,7 @@ class _MessagesList extends StatelessWidget {
         final isPlaying = playingMessageId == m.id;
         final reactions = reactionsBuilder(m);
 
-        // ignore: no_leading_underscores_for_local_identifiers
-        void _openReactions(GlobalKey key) => showReactionsOverlay(
+        void openReactionsLocal(GlobalKey key) => showReactionsOverlay(
               context: context,
               anchorKey: key,
               message: m,
@@ -1187,13 +1343,8 @@ class _MessagesList extends StatelessWidget {
           distanceLabel: distanceBuilder(m),
           timeLabel: timeBuilder(m.timestamp),
           onPlay: () => onPlayMessage(m),
-
-          // 👉 LONG PRESS: SOLO Segnala/Blocca
           onLongPress: (key) => _showMessageActions(context, m, key),
-
-          // 👉 TAP sulla faccina: SOLO reazioni
-          onOpenReactions: _openReactions,
-
+          onOpenReactions: openReactionsLocal,
           onToggleReaction: (emoji) => onToggleReaction(m, emoji),
           pal: pal,
           reactions: reactions,
@@ -1310,7 +1461,16 @@ class _ChatBubble extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        // 👉 SOLO long-press per azioni
+        // [MOD] Tap breve sulla bolla:
+        //      Se NON è un messaggio di testo => è audio -> avvia/ferma riproduzione.
+        //      L'IconButton delle reazioni (figlio) intercetta il suo tap,
+        //      quindi qui non si entra quando si tocca l’icona.
+        onTap: () {
+          if (!message.isText) {
+            onPlay();
+          }
+        },
+        // [INVARIATO] long-press per menu azioni (Segnala/Blocca)
         onLongPress: () => onLongPress(_bubbleKey),
         child: Align(
           alignment: alignment,
@@ -1335,7 +1495,6 @@ class _ChatBubble extends StatelessWidget {
               viewsChip: viewsChip,
               onPlay: onPlay,
               isPlaying: isPlaying,
-              // 👉 TAP sulla faccina reazioni
               onOpenReactions: () => onOpenReactions(_bubbleKey),
             ),
           ),
@@ -1512,6 +1671,8 @@ class _BubbleCore extends StatelessWidget {
                   child: IconButton(
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
+                    // [NOTA] Questo IconButton intercetta il suo tap,
+                    // quindi il GestureDetector padre NON riceve l’evento.
                     onPressed: onOpenReactions,
                     icon: const Icon(Icons.emoji_emotions_outlined),
                   ),
@@ -1583,10 +1744,9 @@ class _ReactionsPill extends StatelessWidget {
                 Text(
                   e.value.toString(),
                   style: TextStyle(
-                    fontSize: 12,
-                    color: _alpha(pal.onSurface, 0.75),
-                    fontWeight: FontWeight.w700,
-                  ),
+                      fontSize: 12,
+                      color: _alpha(pal.onSurface, 0.75),
+                      fontWeight: FontWeight.w700),
                 ),
               ],
             ],

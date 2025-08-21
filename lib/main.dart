@@ -1,6 +1,8 @@
-// main.dart — completo (Material 3, dark mode, blocco utenti, reazioni ottimizzate)
+// main.dart — completo (Material 3, temi Light/Dark/Grey, blocco utenti, reazioni ottimizzate)
 //
 // NOTE di manutenzione su questa revisione:
+// - Aggiunto controller tema (Light / Dark / Grey) via AppThemeController (app_theme.dart)
+// - Pannello “Il tuo account” ora usa i colori del tema (niente bianco fisso)
 // - Aggiunte graffe per tutti gli `if (...) return;` (lint: curly_braces_in_flow_control_structures)
 // - Evitato l'uso del BuildContext dopo gli await senza `mounted` (lint: use_build_context_synchronously)
 // - Ridotti i cast superflui con DocumentSnapshot tipizzati (lint: unnecessary_cast)
@@ -28,6 +30,7 @@ import 'category_utils.dart';
 import 'home_screen_ui.dart';
 import 'voice_message.dart';
 import 'services/user_profile.dart';
+import 'app_theme.dart'; // <<<< Tema (Light/Dark/Grey)
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -103,7 +106,8 @@ class AuthService {
         debugPrint("🎉 Accesso riuscito! UID: ${userCredential.user!.uid}");
 
         // Upsert + schema reconciliation del profilo
-        await _saveUserData(userCredential.user!);
+        await UserProfile.upsertOnAuth(userCredential.user!,
+            provider: 'google', pruneUnknownKeys: true);
 
         return userCredential.user;
       } on FirebaseAuthException catch (e) {
@@ -119,6 +123,7 @@ class AuthService {
     }
   }
 
+  // ignore: unused_element
   Future<void> _saveUserData(User user) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -279,7 +284,7 @@ Future<void> backgroundNotificationHandler() async {
 
   final notificationEnabled = prefs.getBool('notification_sound') ?? true;
   if (!notificationEnabled) {
-    return; // ✅ graffe per lint
+    return;
   }
 
   final currentUserIdPrefs = prefs.getString('user_id') ?? '';
@@ -426,7 +431,9 @@ class LoginScreen extends StatelessWidget {
                 final user = await authService.signInWithGoogle();
                 if (user == null) {
                   debugPrint("❌ Accesso Google fallito");
-                  if (!context.mounted) return; // ✅ lint guard
+                  if (!context.mounted) {
+                    return;
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Accesso fallito. Riprova.')),
                   );
@@ -457,8 +464,26 @@ class AuthWrapper extends StatelessWidget {
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const MaterialApp(
-            home: Scaffold(body: Center(child: CircularProgressIndicator())),
+          // App "vuota" ma tematizzata anche in attesa
+          return AnimatedBuilder(
+            animation: AppThemeController.instance,
+            builder: (context, _) {
+              final t = AppThemeController.instance.theme;
+              return MaterialApp(
+                title: 'TalkInZone',
+                theme: AppThemes.light,
+                darkTheme:
+                    t == AppTheme.grey ? AppThemes.greyDark : AppThemes.dark,
+                // per Grey in login usiamo system per coerenza
+                themeMode: t == AppTheme.light
+                    ? ThemeMode.light
+                    : (t == AppTheme.dark ? ThemeMode.dark : ThemeMode.system),
+                home: const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                ),
+                routes: {'/settings': (context) => const SettingsScreen()},
+              );
+            },
           );
         }
 
@@ -466,7 +491,29 @@ class AuthWrapper extends StatelessWidget {
           return const VoiceChatApp();
         }
 
-        return const MaterialApp(home: LoginScreen());
+        // Non loggato: MaterialApp tematizzata con LoginScreen
+        return AnimatedBuilder(
+          animation: AppThemeController.instance,
+          builder: (context, _) {
+            final t = AppThemeController.instance.theme;
+            final theme =
+                t == AppTheme.grey ? AppThemes.greyLight : AppThemes.light;
+            final darkTheme =
+                t == AppTheme.grey ? AppThemes.greyDark : AppThemes.dark;
+            final mode = t == AppTheme.light
+                ? ThemeMode.light
+                : (t == AppTheme.dark ? ThemeMode.dark : ThemeMode.system);
+
+            return MaterialApp(
+              title: 'TalkInZone',
+              theme: theme,
+              darkTheme: darkTheme,
+              themeMode: mode,
+              home: const LoginScreen(),
+              routes: {'/settings': (context) => const SettingsScreen()},
+            );
+          },
+        );
       },
     );
   }
@@ -1030,7 +1077,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _cleanupOldMessages() async {
     if (_isDisposed) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     final now = DateTime.now();
@@ -1044,7 +1091,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
 
     if (messagesToRemove.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     for (final message in messagesToRemove) {
@@ -1086,14 +1133,14 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _startRecording() async {
     if (!_isInitialized || _recorder == null || _isRecording) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     try {
       await _resetRecorder();
       final permission = await Permission.microphone.request();
       if (!permission.isGranted) {
-        return; // ✅ graffe per lint
+        return;
       }
 
       if (_isPlaying) {
@@ -1150,7 +1197,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _stopRecording() async {
     if (!_isRecording || _recorder == null) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     try {
@@ -1242,12 +1289,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   Future<void> _sendTextMessage() async {
     final raw = _textController.text.trim();
     if (raw.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     // 🆕 Blocca invio se custom senza nome impostato
     if (!_requireCustomNameOrWarn()) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     if (raw.characters.length > 250) {
@@ -1325,7 +1372,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _playNextAfter(String justPlayedId) async {
     if (_isDisposed) {
-      return; // ✅ graffe per lint
+      return;
     }
     final playable = _getPlayableMessages();
     final idx = playable.indexWhere((m) => m.id == justPlayedId);
@@ -1350,7 +1397,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   Future<void> _playMessageInternal(VoiceMessage message,
       {bool fromAuto = false}) async {
     if (_player == null) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -1358,11 +1405,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         ? currentUid
         : _currentUserId;
     if (myUid == null || myUid.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     if (message.isText) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     final bool alreadyViewed = message.viewedBy.contains(myUid);
@@ -1409,7 +1456,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         fromURI: audioPath,
         whenFinished: () {
           if (_isDisposed) {
-            return; // ✅ graffe per lint
+            return;
           }
           Future.microtask(() => _playNextAfter(message.id));
         },
@@ -1454,7 +1501,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   bool _isMessageInRange(VoiceMessage message) {
     if (_currentPosition == null) {
-      return true; // ✅ graffe per lint
+      return true;
     }
     final distance = Geolocator.distanceBetween(
       _currentPosition!.latitude,
@@ -1504,7 +1551,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   // NEW: marca "letto" per TESTO quando la bolla è visibile
   Future<void> _markTextMessageViewed(VoiceMessage message) async {
     if (!message.isText) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -1513,16 +1560,16 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         : _currentUserId;
 
     if (myUid == null || myUid.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
     if (message.senderId == myUid) {
-      return; // ✅ graffe per lint
+      return;
     }
     if (message.viewedBy.contains(myUid)) {
-      return; // ✅ graffe per lint
+      return;
     }
     if (_textSeenOnce.contains(message.id)) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     _textSeenOnce.add(message.id);
@@ -1569,7 +1616,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         : _currentUserId;
 
     if (myUid == null || myUid.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     try {
@@ -1578,7 +1625,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             FirebaseFirestore.instance.collection('messages').doc(message.id);
         final snap = await txn.get(docRef);
         if (!snap.exists) {
-          return; // ✅ graffe per lint
+          return;
         }
 
         // ignore: unnecessary_cast
@@ -1642,7 +1689,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   Future<void> _confirmAndBlock(VoiceMessage m) async {
     final targetUid = m.senderId;
     if (targetUid.isEmpty) {
-      return; // ✅ graffe per lint
+      return;
     }
 
     final ok = await showDialog<bool>(
@@ -1675,7 +1722,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     final now = DateTime.now();
     final filteredMessages = _messages.where((message) {
       return !(now.difference(message.timestamp).inMinutes >= 5) &&
-          !_isHiddenByBlock(message) && // 🆕 filtro blocco
+          !_isHiddenByBlock(message) &&
           _isMessageInRange(message) &&
           _activeFilters.contains(message.category) &&
           _matchesMyCustomName(message);
@@ -1684,6 +1731,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     final canSend = _textController.text.trim().isNotEmpty &&
         _textController.text.characters.length <= 250 &&
         !_isSendingText;
+
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       body: Stack(
@@ -1754,9 +1803,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             }),
             onSettingsPressed: () async {
               await Navigator.pushNamed(context, '/settings');
-              if (!mounted) return; // ✅ lint guard
+              if (!context.mounted) {
+                return;
+              }
               await _loadSettings();
-              if (!mounted) return; // ✅ lint guard
+              if (!context.mounted) {
+                return;
+              }
               setState(() {});
             },
             onProfilePressed: _refreshAndToggleUserInfo,
@@ -1796,7 +1849,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             onRequestBlockUser: _confirmAndBlock,
           ),
 
-          // Pannello profilo (non se c'è il welcome)
+          // Pannello profilo (adattivo ai temi)
           if (!_showWelcomeMessage && _currentUserData != null && _showUserInfo)
             Positioned(
               top: 60,
@@ -1804,21 +1857,26 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cs.surface,
                   boxShadow: [
                     BoxShadow(
                       // ignore: deprecated_member_use
-                      color: Colors.black.withOpacity(0.20),
+                      color: Colors.black.withOpacity(0.15),
                       blurRadius: 10,
                       spreadRadius: 2,
                     )
                   ],
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: cs.outlineVariant,
+                    width: 1,
+                  ),
                 ),
                 width: 250,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Header
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -1827,16 +1885,19 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.blue[800],
+                            color: cs.primary,
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close, size: 20),
+                          icon:
+                              Icon(Icons.close, size: 20, color: cs.onSurface),
                           onPressed: _refreshAndToggleUserInfo,
                         ),
                       ],
                     ),
                     const SizedBox(height: 10),
+
+                    // Avatar / iniziali
                     (() {
                       final fotoUrl =
                           (_currentUserData!['foto_url'] as String?)?.trim();
@@ -1872,54 +1933,60 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       );
                     })(),
                     const SizedBox(height: 10),
+
+                    // Info
                     Text(
                       'ID utente:',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
+                        // ignore: deprecated_member_use
+                        color: cs.onSurface.withOpacity(0.7),
                       ),
                     ),
                     SelectableText(
                       _currentUserId ?? 'Nessun ID',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontFamily: 'monospace',
+                        color: cs.onSurface,
                       ),
                     ),
                     const SizedBox(height: 10),
                     Text(
                       'Nome: ${_currentUserData!['nome'] ?? 'Nessun nome'}',
-                      style: const TextStyle(fontSize: 16),
+                      style: TextStyle(fontSize: 16, color: cs.onSurface),
                     ),
                     const SizedBox(height: 5),
                     Text(
                       'Email: ${_currentUserData!['email'] ?? 'Nessuna email'}',
-                      style: const TextStyle(fontSize: 14),
+                      style: TextStyle(fontSize: 14, color: cs.onSurface),
                     ),
                     const SizedBox(height: 5),
                     Text(
                       'Provider: ${_currentUserData!['provider'] ?? 'N/D'}',
-                      style: const TextStyle(fontSize: 14),
+                      style: TextStyle(fontSize: 14, color: cs.onSurface),
                     ),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
+                    const SizedBox(height: 12),
+
+                    // Esci
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: cs.error,
+                        foregroundColor: cs.onError,
+                      ),
                       onPressed: () async {
                         final authService = AuthService();
                         await authService.signOut();
-                        if (!context.mounted) return; // ✅ lint guard
+                        if (!context.mounted) {
+                          return;
+                        }
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
                               builder: (context) => const AuthWrapper()),
                         );
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                      ),
-                      child: const Text(
-                        'Esci',
-                        style: TextStyle(color: Colors.white),
-                      ),
+                      child: const Text('Esci'),
                     ),
                   ],
                 ),
@@ -2084,6 +2151,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -2095,7 +2163,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.cake_outlined, size: 64),
+                  Icon(Icons.cake_outlined, size: 64, color: cs.primary),
                   const SizedBox(height: 12),
                   const Text(
                     AgeGateStrings.title,
@@ -2159,7 +2227,9 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                   TextButton(
                     onPressed: () async {
                       await AuthService().signOut();
-                      if (!context.mounted) return; // ✅ lint guard
+                      if (!context.mounted) {
+                        return;
+                      }
                       Navigator.pushAndRemoveUntil(
                         context,
                         MaterialPageRoute(builder: (_) => const AuthWrapper()),
@@ -2183,26 +2253,45 @@ class VoiceChatApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'TalkInZone',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-      ),
-      themeMode: ThemeMode.system,
+    return AnimatedBuilder(
+      animation: AppThemeController.instance,
+      builder: (context, _) {
+        final choice = AppThemeController.instance.theme;
 
-      // 🔒 MOSTRA la Home SOLO se data_di_nascita è valorizzata.
-      home: const AgeGateWrapper(child: VoiceChatHome()),
+        switch (choice) {
+          case AppTheme.light:
+            return MaterialApp(
+              title: 'TalkInZone',
+              theme: AppThemes.light,
+              darkTheme: AppThemes.dark,
+              themeMode: ThemeMode.light,
+              // 🔒 MOSTRA la Home SOLO se data_di_nascita è valorizzata.
+              home: const AgeGateWrapper(child: VoiceChatHome()),
+              routes: {'/settings': (context) => const SettingsScreen()},
+            );
 
-      routes: {'/settings': (context) => const SettingsScreen()},
+          case AppTheme.dark:
+            return MaterialApp(
+              title: 'TalkInZone',
+              theme: AppThemes.light,
+              darkTheme: AppThemes.dark,
+              themeMode: ThemeMode.dark,
+              home: const AgeGateWrapper(child: VoiceChatHome()),
+              routes: {'/settings': (context) => const SettingsScreen()},
+            );
+
+          case AppTheme.grey:
+            // Grey usa palette neutra; si adatta al sistema (grey chiaro/scuro)
+            return MaterialApp(
+              title: 'TalkInZone',
+              theme: AppThemes.greyLight,
+              darkTheme: AppThemes.greyDark,
+              themeMode: ThemeMode.system,
+              home: const AgeGateWrapper(child: VoiceChatHome()),
+              routes: {'/settings': (context) => const SettingsScreen()},
+            );
+        }
+      },
     );
   }
 }
@@ -2273,14 +2362,14 @@ Future<void> _runStartupCleanup() async {
         final timestamp = data['timestamp'] as Timestamp?;
 
         if (timestamp == null) {
-          continue; // ✅ graffe per lint
+          continue;
         }
 
         final expirationTime = timestamp.toDate().add(
               const Duration(minutes: 5),
             );
         if (DateTime.now().isBefore(expirationTime)) {
-          continue; // ✅ graffe per lint
+          continue;
         }
 
         debugPrint('🗑️ [STARTUP] Cancellazione messaggio scaduto: ${doc.id}');
@@ -2309,6 +2398,9 @@ Future<void> _runStartupCleanup() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // Carica la scelta tema salvata (Light / Dark / Grey)
+  await AppThemeController.instance.load();
 
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
