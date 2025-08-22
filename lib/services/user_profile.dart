@@ -7,6 +7,10 @@
 //   e opzionalmente rimuove (pruning) chiavi non più presenti nello script.
 // - Espone helper per aggiornare solo ultimo_accesso, gestire id_bloccati,
 //   e impostare/cancellare data_di_nascita.
+//
+// 🔧 FIX anti-“rimbalzo” age-gate:
+// Il reconcile/pruning NON deve mai impostare `data_di_nascita` a null
+// né riscriverla. Il pruning ora usa merge:true + FieldValue.delete().
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -26,8 +30,9 @@ class UserProfileKeys {
   // === chiavi aggiuntive (app) ===
   static const status = 'status';
   static const likeTotali = 'like_totali';
-  // static const affidabilita = 'affidabilita';
   static const idBloccati = 'id_bloccati'; // LISTA di UID
+  static const blockedNames =
+      'blocked_names'; // MAPPA { uid -> nomeMostrabile }
 
   /// Nuova chiave richiesta
   static const dataDiNascita = 'data_di_nascita'; // Timestamp o null
@@ -53,9 +58,11 @@ class UserProfileSchema {
     // aggiuntive
     UserProfileKeys.status: () => 'active',
     UserProfileKeys.likeTotali: () => 0,
-    // UserProfileKeys.affidabilita: () => 0,
     UserProfileKeys.idBloccati: () => <String>[],
-    UserProfileKeys.dataDiNascita: () => null, // valorizzata dall’utente
+    UserProfileKeys.blockedNames: () => <String, String>{},
+
+    // Età: viene valorizzata dall’utente nel gate, default = null
+    UserProfileKeys.dataDiNascita: () => null,
   };
 
   /// Mappa iniziale alla PRIMA creazione del documento.
@@ -76,8 +83,10 @@ class UserProfileSchema {
       // aggiuntive
       UserProfileKeys.status: defaults[UserProfileKeys.status]!(),
       UserProfileKeys.likeTotali: defaults[UserProfileKeys.likeTotali]!(),
-      // UserProfileKeys.affidabilita: defaults[UserProfileKeys.affidabilita]!(),
       UserProfileKeys.idBloccati: defaults[UserProfileKeys.idBloccati]!(),
+      UserProfileKeys.blockedNames: defaults[UserProfileKeys.blockedNames]!(),
+
+      // Età (null alla creazione, l’utente la imposta nel gate)
       UserProfileKeys.dataDiNascita: defaults[UserProfileKeys.dataDiNascita]!(),
     };
   }
@@ -139,16 +148,18 @@ class UserProfile {
   }
 
   /// Imposta la data di nascita (Timestamp) o la cancella se null.
-  /// Esegue una piccola validazione: non può essere nel futuro.
-  static Map<String, dynamic> setDataDiNascita(DateTime? dob) {
-    if (dob == null) {
+  /// - Non può essere nel futuro
+  /// - Normalizzata a mezzanotte UTC (evita problemi di fuso/orario legale)
+  static Map<String, dynamic> setDataDiNascita(DateTime? dobLocal) {
+    if (dobLocal == null) {
       return {UserProfileKeys.dataDiNascita: null};
     }
     final now = DateTime.now();
-    if (dob.isAfter(now)) {
+    if (dobLocal.isAfter(now)) {
       throw ArgumentError('La data di nascita non può essere futura.');
     }
-    return {UserProfileKeys.dataDiNascita: Timestamp.fromDate(dob)};
+    final dobUtc = DateTime.utc(dobLocal.year, dobLocal.month, dobLocal.day);
+    return {UserProfileKeys.dataDiNascita: Timestamp.fromDate(dobUtc)};
   }
 
   /// (Opzionale) Sincronizza schema on-demand per un UID specifico.
@@ -166,8 +177,9 @@ class UserProfile {
   }
 
   /// Confronta con lo schema:
-  /// - aggiunge SOLO chiavi mancanti con default
+  /// - aggiunge SOLO chiavi mancanti con default (MAI `data_di_nascita`)
   /// - opzionalmente elimina chiavi non presenti nello script (pruning)
+  ///   usando merge:true + FieldValue.delete() per evitare overwrite.
   static Future<void> _reconcileSchema(
     DocumentReference<Map<String, dynamic>> ref, {
     required Map<String, dynamic> existing,
@@ -176,30 +188,40 @@ class UserProfile {
   }) async {
     final schemaKeys = UserProfileSchema.defaults.keys.toSet();
 
-    // Aggiunte mancanti
+    // 1) Pruning: prepara solo DELETE delle chiavi non previste
+    final Map<String, dynamic> deletes = {};
+    if (pruneUnknownKeys) {
+      for (final key in existing.keys) {
+        if (!schemaKeys.contains(key)) {
+          deletes[key] = FieldValue.delete();
+        }
+      }
+    }
+
+    // 2) Aggiunte mancanti con default (ma NON per data_di_nascita)
     final Map<String, dynamic> toAdd = {};
     for (final key in schemaKeys) {
-      final exists = existing.containsKey(key) && existing[key] != null;
-      if (!exists) {
+      if (key == UserProfileKeys.dataDiNascita) {
+        // mai auto-scrivere data_di_nascita: la gestisce l'utente dal gate
+        continue;
+      }
+      final hasNonNull = existing.containsKey(key) && existing[key] != null;
+
+      if (!hasNonNull) {
+        // Non reinizializzare data_registrazione su documenti già esistenti
         if (!documentJustCreated && key == UserProfileKeys.dataRegistrazione) {
-          continue; // non reinizializzare data_registrazione
+          continue;
         }
         toAdd[key] = UserProfileSchema.defaults[key]!();
       }
     }
 
-    // Rimozione extra (chiavi non presenti nello script)
-    final Map<String, dynamic> toDelete = {};
-    if (pruneUnknownKeys) {
-      for (final key in existing.keys) {
-        if (!schemaKeys.contains(key)) {
-          toDelete[key] = FieldValue.delete();
-        }
-      }
-    }
-
-    if (toAdd.isNotEmpty || toDelete.isNotEmpty) {
-      await ref.set({...toAdd, ...toDelete}, SetOptions(merge: true));
+    // 3) Unica write con merge:true:
+    //    - elimina solo le chiavi extra
+    //    - aggiunge le mancanti
+    //    - NON tocca i campi esistenti (inclusa data_di_nascita)
+    if (toAdd.isNotEmpty || deletes.isNotEmpty) {
+      await ref.set({...deletes, ...toAdd}, SetOptions(merge: true));
     }
   }
 }

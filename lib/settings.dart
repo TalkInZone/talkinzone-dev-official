@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_constants.dart';
 import 'app_theme.dart';
+// ⬇️ i18n: controller lingua
+import 'i18n/app_locale.dart';
 
 // Piccolo modello per la UI della lista bloccati.
 class BlockedUser {
@@ -37,6 +39,10 @@ class SettingsScreenState extends State<SettingsScreen> {
   // Tema
   AppTheme _currentTheme = AppTheme.light;
 
+  // Lingua (UI locale corrente)
+  Locale _currentLocale = AppLocaleController.instance.locale;
+  late final VoidCallback _localeListener;
+
   // Categoria personalizzata
   String? _customCategoryName;
 
@@ -61,11 +67,20 @@ class SettingsScreenState extends State<SettingsScreen> {
     _checkBatteryOptimization();
     _checkLocationPermission();
     _attachBlockedListener();
+
+    // ⬇️ ascolta cambi lingua per aggiornare le Radio
+    _localeListener = () {
+      if (mounted) {
+        setState(() => _currentLocale = AppLocaleController.instance.locale);
+      }
+    };
+    AppLocaleController.instance.addListener(_localeListener);
   }
 
   @override
   void dispose() {
     _myDocSub?.cancel();
+    AppLocaleController.instance.removeListener(_localeListener);
     super.dispose();
   }
 
@@ -399,6 +414,48 @@ class SettingsScreenState extends State<SettingsScreen> {
                       if (v == null) return;
                       setState(() => _currentTheme = v);
                       await AppThemeController.instance.setTheme(v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // ---------- Lingua ----------
+            Text(
+              'Lingua / Language',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: cs.secondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  RadioListTile<Locale>(
+                    title: const Text('English'),
+                    value: const Locale('en'),
+                    groupValue: _currentLocale,
+                    onChanged: (l) {
+                      if (l == null) return;
+                      AppLocaleController.instance.setLocale(l);
+                    },
+                  ),
+                  const Divider(height: 1),
+                  RadioListTile<Locale>(
+                    title: const Text('Italiano'),
+                    value: const Locale('it'),
+                    groupValue: _currentLocale,
+                    onChanged: (l) {
+                      if (l == null) return;
+                      AppLocaleController.instance.setLocale(l);
                     },
                   ),
                 ],

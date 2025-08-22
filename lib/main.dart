@@ -6,6 +6,8 @@
 // - Aggiunte graffe per tutti gli `if (...) return;` (lint: curly_braces_in_flow_control_structures)
 // - Evitato l'uso del BuildContext dopo gli await senza `mounted` (lint: use_build_context_synchronously)
 // - Ridotti i cast superflui con DocumentSnapshot tipizzati (lint: unnecessary_cast)
+// 🌍 I18N: integrazione localizzazione EN/IT (default EN) con AppLocaleController + delegates
+// 🔒 Age Gate: fix anti-flicker — mostra loader finché lo snapshot è da cache o con pending writes
 
 import 'dart:async';
 import 'dart:io';
@@ -31,6 +33,12 @@ import 'home_screen_ui.dart';
 import 'voice_message.dart';
 import 'services/user_profile.dart';
 import 'app_theme.dart'; // <<<< Tema (Light/Dark/Grey)
+
+// 🌍 I18N: import pacchetti di localizzazione
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'gen_l10n/app_localizations.dart';
+// 🌍 I18N: controller lingua runtime
+import 'i18n/app_locale.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -466,7 +474,11 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           // App "vuota" ma tematizzata anche in attesa
           return AnimatedBuilder(
-            animation: AppThemeController.instance,
+            // 🌍 I18N: ascolta anche i cambi lingua
+            animation: Listenable.merge([
+              AppThemeController.instance,
+              AppLocaleController.instance,
+            ]),
             builder: (context, _) {
               final t = AppThemeController.instance.theme;
               return MaterialApp(
@@ -478,6 +490,17 @@ class AuthWrapper extends StatelessWidget {
                 themeMode: t == AppTheme.light
                     ? ThemeMode.light
                     : (t == AppTheme.dark ? ThemeMode.dark : ThemeMode.system),
+
+                // 🌍 I18N: locale dinamica (default EN)
+                locale: AppLocaleController.instance.locale,
+                supportedLocales: const [Locale('en'), Locale('it')],
+                localizationsDelegates: const [
+                  AppLocalizations.delegate,
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+
                 home: const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
                 ),
@@ -493,7 +516,11 @@ class AuthWrapper extends StatelessWidget {
 
         // Non loggato: MaterialApp tematizzata con LoginScreen
         return AnimatedBuilder(
-          animation: AppThemeController.instance,
+          // 🌍 I18N: ascolta anche i cambi lingua
+          animation: Listenable.merge([
+            AppThemeController.instance,
+            AppLocaleController.instance,
+          ]),
           builder: (context, _) {
             final t = AppThemeController.instance.theme;
             final theme =
@@ -509,6 +536,17 @@ class AuthWrapper extends StatelessWidget {
               theme: theme,
               darkTheme: darkTheme,
               themeMode: mode,
+
+              // 🌍 I18N
+              locale: AppLocaleController.instance.locale,
+              supportedLocales: const [Locale('en'), Locale('it')],
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+
               home: const LoginScreen(),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -1999,7 +2037,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 }
 
 // ============================================================================
-// 🔒 Age Gate (Data di nascita obbligatoria, minimo 16 anni)
+// 🔒 Age Gate (Data di nascita obbligatoria, minimo 16 anni) + FIX ANTI-FLICKER
 // ============================================================================
 class AgeGateConfig {
   static const int minAgeYears = 16;
@@ -2034,6 +2072,7 @@ class AgeGateStrings {
   static AgeGateErrors get errors => const AgeGateErrors();
 }
 
+// 🔧 FIX ANTI-FLICKER: mostra AgeGate solo quando la mancanza della data è confermata dal server
 class AgeGateWrapper extends StatelessWidget {
   final Widget child;
   const AgeGateWrapper({super.key, required this.child});
@@ -2047,21 +2086,34 @@ class AgeGateWrapper extends StatelessWidget {
 
     final ref = FirebaseFirestore.instance.collection('utenti').doc(uid);
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: ref.snapshots(),
+      stream: ref.snapshots(includeMetadataChanges: true),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+        if (snap.connectionState == ConnectionState.waiting || !snap.hasData) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        final data = snap.data?.data() ?? <String, dynamic>{};
-        final ts = data[UserProfileKeys.dataDiNascita] as Timestamp?;
 
-        if (ts == null) {
-          return const DateOfBirthScreen();
+        final doc = snap.data!;
+        final data = doc.data() ?? <String, dynamic>{};
+        final ts = data[UserProfileKeys.dataDiNascita] as Timestamp?;
+        final bool pending = doc.metadata.hasPendingWrites;
+        final bool fromCache = doc.metadata.isFromCache;
+
+        // ⏳ Se lo snapshot è da cache o ci sono write pendenti → evita cambi schermo
+        if (pending || fromCache) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
-        return child;
+        // ✅ Data presente (confermata dal server) → entra
+        if (ts != null) {
+          return child;
+        }
+
+        // ❌ Data assente (confermata dal server) → mostra AgeGate
+        return const DateOfBirthScreen();
       },
     );
   }
@@ -2254,7 +2306,11 @@ class VoiceChatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: AppThemeController.instance,
+      // 🌍 I18N: ascolta anche i cambi lingua
+      animation: Listenable.merge([
+        AppThemeController.instance,
+        AppLocaleController.instance,
+      ]),
       builder: (context, _) {
         final choice = AppThemeController.instance.theme;
 
@@ -2265,6 +2321,17 @@ class VoiceChatApp extends StatelessWidget {
               theme: AppThemes.light,
               darkTheme: AppThemes.dark,
               themeMode: ThemeMode.light,
+
+              // 🌍 I18N
+              locale: AppLocaleController.instance.locale,
+              supportedLocales: const [Locale('en'), Locale('it')],
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+
               // 🔒 MOSTRA la Home SOLO se data_di_nascita è valorizzata.
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
@@ -2276,6 +2343,17 @@ class VoiceChatApp extends StatelessWidget {
               theme: AppThemes.light,
               darkTheme: AppThemes.dark,
               themeMode: ThemeMode.dark,
+
+              // 🌍 I18N
+              locale: AppLocaleController.instance.locale,
+              supportedLocales: const [Locale('en'), Locale('it')],
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -2287,6 +2365,17 @@ class VoiceChatApp extends StatelessWidget {
               theme: AppThemes.greyLight,
               darkTheme: AppThemes.greyDark,
               themeMode: ThemeMode.system,
+
+              // 🌍 I18N
+              locale: AppLocaleController.instance.locale,
+              supportedLocales: const [Locale('en'), Locale('it')],
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -2401,6 +2490,9 @@ void main() async {
 
   // Carica la scelta tema salvata (Light / Dark / Grey)
   await AppThemeController.instance.load();
+
+  // 🌍 I18N: carica lingua salvata (default EN)
+  await AppLocaleController.instance.load();
 
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

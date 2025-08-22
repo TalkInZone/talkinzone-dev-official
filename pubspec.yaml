@@ -10,6 +10,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  # CONSIGLIO: rimuovi il pin esplicito di intl per evitare conflitti.
+  # Se vuoi tenerlo, assicurati che sia compatibile con la tua versione di Flutter.
+  # intl: ^0.20.2
 
   # Firebase - versioni verificate
   firebase_core: ^2.28.0
@@ -25,10 +30,10 @@ dependencies:
   # Audio
   flutter_sound: ^9.2.13
   
-  # Notifiche - VERSIONI VERIFICATE
+  # Notifiche
   flutter_local_notifications: ^17.2.3
 
-  workmanager: ^0.6.0  # or check pub.dev for the newest version
+  workmanager: ^0.6.0
   
   # Permessi
   permission_handler: ^11.0.1
@@ -36,7 +41,7 @@ dependencies:
   
   # Storage
   path_provider: ^2.1.1
-  shared_preferences: ^2.2.1
+  shared_preferences: ^2.2.2
   minio: ^3.1.0
   path: ^1.9.0
   uuid: ^4.5.1
@@ -61,3 +66,4 @@ flutter:
   assets:
     - assets/app_logo.png
     - assets/google_logo.png
+  generate: true   # <-- lascia solo questo (niente gen-l10n qui)

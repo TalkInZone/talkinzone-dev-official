@@ -1,18 +1,15 @@
 // =============================================================================
-// 📦 FILE: home_screen_ui.dart  (COMPLETO)
+// 📦 FILE: home_screen_ui.dart  (I18N-READY)
 // =============================================================================
-// ✅ NOVITÀ DI QUESTA VERSIONE
-// - LONG PRESS sulla bolla: SOLO "Segnala" e "Blocca/Ignora".
-// - TAP sulla faccina 🙂: apre il selettore reazioni.
-// - Fallback interno per "Segnala" (scrive su `reports/`).
-// - Overlay reazioni su rootOverlay (sopra tutto).
-// - SHIFT +5px a destra SOLO per messaggi ricevuti (non tuoi).
-// - 🔧 FIX TAGLIO VERTICALE EMOJI nella pill delle reazioni.
-// - 🔒 BLOCCO: usa la callback esterna se c’è; altrimenti fallback interno
-//   con tentativi multipli su path comuni e messaggi d’errore dettagliati.
-// - 🧨 SELF-DESTRUCT: animazione di sgretolamento per-messaggio che parte
-//   a 6s dalla scadenza; non influenza gli altri messaggi.
-// - ⏱ TTL: countdown aggiornato a 10 minuti.
+// ✅ What changed
+// - All hard-coded strings now come from AppLocalizations (EN default).
+// - Tiny helpers (_formatRelative/_formatDistance*) now use BuildContext to
+//   access localized strings (no logic changes).
+// - Tooltips, dialogs, snackbars, empty states, composer hint, etc. localized.
+// - No changes to data flow, callbacks, or rendering logic.
+//
+// Requires: import of `gen_l10n/app_localizations.dart` and the ARB keys
+// listed after this file.
 // =============================================================================
 
 import 'dart:async';
@@ -21,8 +18,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-// <<< PATCH BLOCCO: per recuperare l'UID se non arriva dal parent
 import 'package:firebase_auth/firebase_auth.dart';
+import 'gen_l10n/app_localizations.dart';
+import 'i18n_compat.dart'; // <-- AGGIUNGI QUESTA RIGA
 
 import 'category_utils.dart'
     show
@@ -37,13 +35,13 @@ Color _alpha(Color c, double opacity01) =>
     c.withAlpha(((opacity01.clamp(0.0, 1.0)) * 255).round());
 
 // =============================================================================
-// ⏱ TTL & finestra autodistruzione (solo qui, non tocchiamo altri file)
+// ⏱ TTL & self-destruct window
 // =============================================================================
-const Duration _kMessageTTL = Duration(minutes: 10); // ⏱ 10 minuti
-const Duration _kDestructWindow = Duration(seconds: 6); // 🧨 parte a T-6s
+const Duration _kMessageTTL = Duration(minutes: 10);
+const Duration _kDestructWindow = Duration(seconds: 6);
 
 // =============================================================================
-// 🎨 Palette adattiva
+// 🎨 Adaptive palette
 // =============================================================================
 class _AdaptivePalette {
   final Color surface;
@@ -316,30 +314,34 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     return true;
   }
 
-  String _formatRelative(DateTime ts) {
+  // ---------- Localized formatters ----------
+  String _formatRelativeWithLoc(BuildContext context, DateTime ts) {
+    final t = AppLocalizations.of(context);
     final now = DateTime.now();
     final diff = now.difference(ts);
-    if (diff.inMinutes < 1) return 'Ora';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min fa';
-    if (diff.inHours < 24) return '${diff.inHours} h fa';
+    if (diff.inMinutes < 1) return t.relNow();
+    if (diff.inMinutes < 60) return t.relMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return t.relHoursAgo(diff.inHours);
+    // Keep a short dd/MM HH:mm for both locales (simple & compact)
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(ts.day)}/${two(ts.month)} ${two(ts.hour)}:${two(ts.minute)}';
   }
 
-  String _formatDistanceMeters(double meters) {
-    if (meters < 60) return 'Molto vicino';
-    if (meters < 300) return 'Vicino';
-    if (meters < 1000) return '${meters.toStringAsFixed(0)} m';
-    return '${(meters / 1000).toStringAsFixed(1)} km';
+  String _formatDistanceMetersLoc(BuildContext context, double meters) {
+    final t = AppLocalizations.of(context);
+    if (meters < 60) return t.distVeryClose();
+    if (meters < 300) return t.distClose();
+    if (meters < 1000) return '${meters.toStringAsFixed(0)} ${t.unitM()}';
+    return '${(meters / 1000).toStringAsFixed(1)} ${t.unitKm()}';
   }
 
-  String _formatDistanceBucket(double meters) {
-    if (meters <= 500) return 'molto vicino';
-    if (meters <= 1000) return 'vicino';
-    if (meters <= 2000) return 'in zona';
-    if (meters <= 3000) return 'distante';
-    if (meters <= 6000) return 'molto distante';
-    return 'molto distante';
+  String _formatDistanceBucketLoc(BuildContext context, double meters) {
+    final t = AppLocalizations.of(context);
+    if (meters <= 500) return t.distVeryClose();
+    if (meters <= 1000) return t.distClose();
+    if (meters <= 2000) return t.distInArea();
+    if (meters <= 3000) return t.distFar();
+    return t.distVeryFar();
   }
 
   double _distanceTo(VoiceMessage m) {
@@ -542,7 +544,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   }
 
   // ===========================================================================
-  // 🎯 Overlay reazioni (reaction picker) — con patch anti-taglio
+  // 🎯 Reactions overlay (picker)
   // ===========================================================================
   void _showReactionsOverlay({
     required BuildContext context,
@@ -687,6 +689,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
   void _showReactionsFallbackDialog(
       BuildContext context, VoiceMessage message) {
+    final t = AppLocalizations.of(context);
     const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
     final String? current =
         _myReactionLocal[message.id] ?? _myReactionFromDoc[message.id];
@@ -694,7 +697,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reazioni'),
+        title: Text(t.reactionsTitle()),
         content: Wrap(
           spacing: 8,
           children: emojis.map((e) {
@@ -719,7 +722,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Chiudi'),
+            child: Text(t.close()),
           ),
         ],
       ),
@@ -728,6 +731,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final canSendText = widget.textController.text.trim().isNotEmpty &&
         widget.textController.text.characters.length <= 250 &&
         !widget.isSendingText;
@@ -781,19 +785,19 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       ),
                       userNameBuilder: (m) {
                         final myId = widget.currentUserId ?? '';
-                        if (m.senderId == myId) return 'Tu';
+                        if (m.senderId == myId) return t.you();
                         final String n = (m.name).trim();
-                        return n.isEmpty ? 'Anonimo' : n;
+                        return n.isEmpty ? t.anonymous() : n;
                       },
                       distanceBuilder: (m) {
                         final d = _distanceTo(m);
                         final isMine =
                             m.senderId == (widget.currentUserId ?? '');
                         return isMine
-                            ? _formatDistanceMeters(d)
-                            : _formatDistanceBucket(d);
+                            ? _formatDistanceMetersLoc(context, d)
+                            : _formatDistanceBucketLoc(context, d);
                       },
-                      timeBuilder: _formatRelative,
+                      timeBuilder: (ts) => _formatRelativeWithLoc(context, ts),
                       pal: _AdaptivePalette.of(
                         context,
                         accent: widget.selectedCategory.color,
@@ -871,6 +875,7 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final color = selectedCategory.color;
     final pal = _AdaptivePalette.of(context, accent: color);
 
@@ -881,7 +886,7 @@ class _TopBar extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              tooltip: 'Impostazioni',
+              tooltip: t.tooltipSettings(),
               onPressed: onSettingsPressed,
               icon: const Icon(Icons.settings),
             ),
@@ -929,17 +934,17 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             IconButton(
-              tooltip: 'Filtri',
+              tooltip: t.tooltipFilters(),
               onPressed: onToggleFilterSelector,
               icon: const Icon(Icons.filter_list),
             ),
             IconButton(
-              tooltip: 'Raggio',
+              tooltip: t.tooltipRadius(),
               onPressed: onToggleRadiusSelector,
               icon: const Icon(Icons.radar),
             ),
             IconButton(
-              tooltip: 'Profilo',
+              tooltip: t.tooltipProfile(),
               onPressed: onProfilePressed,
               icon: const Icon(Icons.person),
             ),
@@ -951,7 +956,7 @@ class _TopBar extends StatelessWidget {
 }
 
 // =============================================================================
-// 📡 Selettore raggio
+// 📡 Radius selector
 // =============================================================================
 class _RadiusSelector extends StatelessWidget {
   final double current;
@@ -963,6 +968,13 @@ class _RadiusSelector extends StatelessWidget {
     required this.options,
     required this.onSelected,
   });
+
+  String _radiusLabel(BuildContext context, double r) {
+    final t = AppLocalizations.of(context);
+    return (r >= 1000)
+        ? '${(r / 1000).toStringAsFixed(1)} ${t.unitKm()}'
+        : '${r.toStringAsFixed(0)} ${t.unitM()}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -981,11 +993,7 @@ class _RadiusSelector extends StatelessWidget {
               final selected = r == current;
               return ChoiceChip(
                 selected: selected,
-                label: Text(
-                  r >= 1000
-                      ? '${(r / 1000).toStringAsFixed(1)} km'
-                      : '${r.toStringAsFixed(0)} m',
-                ),
+                label: Text(_radiusLabel(context, r)),
                 onSelected: (_) => onSelected(r),
               );
             }).toList(),
@@ -997,7 +1005,7 @@ class _RadiusSelector extends StatelessWidget {
 }
 
 // =============================================================================
-// 📨 Lista messaggi
+// 📨 Messages list
 // =============================================================================
 class _MessagesList extends StatelessWidget {
   final List<VoiceMessage> messages;
@@ -1045,9 +1053,7 @@ class _MessagesList extends StatelessWidget {
     this.onRequestReportUser,
   });
 
-  // ------------------------------------------------------------
-  // 🔒 Fallback interno di blocco con tentativi multipli
-  // ------------------------------------------------------------
+  // ---------- Block fallback ----------
   Future<bool> _tryAppendBlocked({
     required String collection,
     required String field,
@@ -1061,45 +1067,44 @@ class _MessagesList extends StatelessWidget {
   }
 
   Future<void> _blockFlow(BuildContext context, VoiceMessage m) async {
-    // <<< PATCH BLOCCO: recupero UID (prop o FirebaseAuth)
-    final uid = currentUserId ??
-        FirebaseAuth
-            .instance.currentUser?.uid; // può essere null se non loggato
+    final t = AppLocalizations.of(context);
+
+    final uid = currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
 
     if (uid == null || uid.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Devi essere autenticato per bloccare.')),
+        SnackBar(content: Text(t.mustBeAuthenticatedToBlock())),
       );
       return;
     }
     if (m.senderId == uid) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Non puoi bloccare te stesso.')),
+        SnackBar(content: Text(t.cannotBlockYourself())),
       );
       return;
     }
     if (m.senderId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ID utente da bloccare non valido.')),
+        SnackBar(content: Text(t.invalidUserIdToBlock())),
       );
       return;
     }
 
-    final targetName = (m.name).trim().isEmpty ? 'utente' : m.name.trim();
     final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Blocca/ignora'),
-            content:
-                Text('Non vedrai più i messaggi di $targetName. Confermi?'),
+            title: Text(t.blockIgnoreTitle()),
+            content: Text(t.blockConfirmText(
+              (m.name).trim().isEmpty ? t.anonymous() : m.name.trim(),
+            )),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Annulla'),
+                child: Text(t.cancel()),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Blocca'),
+                child: Text(t.block()),
               ),
             ],
           ),
@@ -1107,7 +1112,6 @@ class _MessagesList extends StatelessWidget {
         false;
     if (!ok) return;
 
-    // <<< PATCH BLOCCO: proviamo più percorsi/field comuni
     final attempts = <({String coll, String field})>[
       (coll: 'users', field: 'blockedUserIds'),
       (coll: 'utenti', field: 'id_bloccati'),
@@ -1124,38 +1128,35 @@ class _MessagesList extends StatelessWidget {
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Utente bloccato (${a.coll}/${a.field}).')),
+            SnackBar(content: Text(t.userBlockedSimple())),
           );
         }
-        return; // successo
+        return;
       } on FirebaseException catch (e) {
         lastErr = e;
-        // continua col prossimo tentativo
       } catch (e) {
-        // errore generico: interrompi e segnala
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Errore durante il blocco: $e')),
+            SnackBar(content: Text('${t.blockError()}: $e')),
           );
         }
         return;
       }
     }
 
-    // Se arriviamo qui, tutti i tentativi Firestore sono falliti
     if (context.mounted) {
-      final code = lastErr?.code ?? 'sconosciuto';
+      final code = lastErr?.code ?? 'unknown';
       final msg = lastErr?.message ?? lastErr.toString();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Errore durante il blocco [$code]: $msg'),
-        ),
+        SnackBar(content: Text('${t.blockError()}: [$code] $msg')),
       );
     }
   }
 
-  // 🆘 Flow di segnalazione (fallback interno se non fornisci un callback)
+  // ---------- Report fallback ----------
   Future<void> _reportFlow(BuildContext context, VoiceMessage m) async {
+    final t = AppLocalizations.of(context);
+
     if (onRequestReportUser != null) {
       onRequestReportUser!(m);
       return;
@@ -1165,19 +1166,18 @@ class _MessagesList extends StatelessWidget {
     final bool confirmed = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Segnala utente'),
+            title: Text(t.reportUserTitle()),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                    'Descrivi brevemente il motivo della segnalazione (opzionale):'),
+                Text(t.reportDescribeOptional()),
                 const SizedBox(height: 8),
                 TextField(
                   controller: reasonCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    hintText: 'Es. spam, linguaggio offensivo…',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    hintText: t.reportReasonHint(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
               ],
@@ -1185,11 +1185,11 @@ class _MessagesList extends StatelessWidget {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Annulla'),
+                child: Text(t.cancel()),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Invia'),
+                child: Text(t.send()),
               ),
             ],
           ),
@@ -1216,18 +1216,13 @@ class _MessagesList extends StatelessWidget {
       await FirebaseFirestore.instance.collection('reports').add(payload);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Segnalazione inviata. Grazie!')),
+          SnackBar(content: Text(t.reportSentThanks())),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Segnalazione non inviata: ${e.toString()}',
-              maxLines: 3,
-            ),
-          ),
+          SnackBar(content: Text('${t.reportNotSent()}: ${e.toString()}')),
         );
       }
     }
@@ -1239,11 +1234,9 @@ class _MessagesList extends StatelessWidget {
     GlobalKey anchorKey,
   ) async {
     HapticFeedback.mediumImpact();
+    final t = AppLocalizations.of(context);
 
     final isMine = m.senderId == (currentUserId ?? '');
-    final displayName = isMine
-        ? 'te stesso'
-        : ((m.name).trim().isEmpty ? 'Anonimo' : m.name.trim());
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1260,12 +1253,11 @@ class _MessagesList extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.flag_outlined, color: Colors.orange),
                 title: isMine
-                    ? const Text('Non puoi segnalare te stesso')
-                    : Text(
-                        'Segnala ${displayName == 'Anonimo' ? 'utente' : displayName}'),
+                    ? Text(t.cannotReportYourself())
+                    : Text(t.reportUserTitleShort()),
                 subtitle: isMine
-                    ? const Text('Operazione non consentita')
-                    : const Text('Invia una segnalazione'),
+                    ? Text(t.operationNotAllowed())
+                    : Text(t.reportUserSubtitle()),
                 enabled: !isMine,
                 onTap: isMine
                     ? null
@@ -1276,24 +1268,23 @@ class _MessagesList extends StatelessWidget {
               ),
               ListTile(
                 leading: const Icon(Icons.block, color: Colors.redAccent),
-                title: Text(isMine
-                    ? 'Non puoi bloccare te stesso'
-                    : 'Blocca/Ignora $displayName'),
+                title: isMine
+                    ? Text(t.cannotBlockYourself())
+                    : Text(t.blockIgnoreTitleShort()),
                 subtitle: isMine
-                    ? const Text('Operazione non consentita')
-                    : const Text('Non vedrai più i messaggi di questo utente'),
+                    ? Text(t.operationNotAllowed())
+                    : Text(t.blockIgnoreSubtitle()),
                 enabled: !isMine,
-                // <<< PATCH BLOCCO: callback esterna se presente; altrimenti fallback multipath
                 onTap: isMine
                     ? null
                     : () async {
                         Navigator.pop(ctx);
                         if (onRequestBlockUser != null) {
                           try {
-                            onRequestBlockUser!(m); // tua logica "storica"
+                            onRequestBlockUser!(m);
                             return;
                           } catch (_) {
-                            // se la callback lancia, prosegui col fallback
+                            // fallback below
                           }
                         }
                         await _blockFlow(context, m);
@@ -1309,10 +1300,14 @@ class _MessagesList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+
     if (messages.isEmpty) {
-      return const Center(
-        child: Text('Nessun messaggio nella tua zona…',
-            style: TextStyle(color: Colors.grey)),
+      return Center(
+        child: Text(
+          t.noMessagesInArea(),
+          style: const TextStyle(color: Colors.grey),
+        ),
       );
     }
 
@@ -1340,7 +1335,7 @@ class _MessagesList extends StatelessWidget {
             );
 
         return _ChatBubble(
-          key: ValueKey(m.id), // 🧨 SELF-DESTRUCT: stato per-messaggio
+          key: ValueKey(m.id),
           message: m,
           isMine: isMine,
           isPlaying: isPlaying,
@@ -1403,20 +1398,18 @@ class _ChatBubble extends StatefulWidget {
 
 class _ChatBubbleState extends State<_ChatBubble>
     with SingleTickerProviderStateMixin {
-  // 🧨 SELF-DESTRUCT: controller per animazione per-messaggio
   late final AnimationController _destructCtrl;
   Timer? _startTimer;
   bool _started = false;
 
-  DateTime get _expiry =>
-      widget.message.timestamp.add(_kMessageTTL); // ⏱ usa 10 minuti
+  DateTime get _expiry => widget.message.timestamp.add(_kMessageTTL);
 
   @override
   void initState() {
     super.initState();
     _destructCtrl = AnimationController(
       vsync: this,
-      duration: _kDestructWindow, // animazione di 6s
+      duration: _kDestructWindow,
     );
     _scheduleDestruction();
   }
@@ -1424,7 +1417,6 @@ class _ChatBubbleState extends State<_ChatBubble>
   @override
   void didUpdateWidget(covariant _ChatBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Se cambia il messaggio (nuovo id) o timestamp, rischedula
     if (oldWidget.message.id != widget.message.id ||
         oldWidget.message.timestamp != widget.message.timestamp) {
       _startTimer?.cancel();
@@ -1439,13 +1431,11 @@ class _ChatBubbleState extends State<_ChatBubble>
     final now = DateTime.now();
     final startAt = _expiry.subtract(_kDestructWindow);
     if (now.isAfter(_expiry)) {
-      // già scaduto → salta alla fine
       _started = true;
       _destructCtrl.value = 1;
       return;
     }
     if (!now.isBefore(startAt)) {
-      // siamo già dentro la finestra → parte subito con progress allineato
       final elapsed = now.difference(startAt);
       final p = (elapsed.inMilliseconds / _kDestructWindow.inMilliseconds)
           .clamp(0.0, 1.0);
@@ -1454,7 +1444,6 @@ class _ChatBubbleState extends State<_ChatBubble>
       _destructCtrl.forward();
       return;
     }
-    // non ancora nella finestra → timer fino a T-6s
     final delay = startAt.difference(now);
     _startTimer = Timer(delay, () {
       if (!mounted) return;
@@ -1473,7 +1462,6 @@ class _ChatBubbleState extends State<_ChatBubble>
 
   @override
   Widget build(BuildContext context) {
-    // Valore animazione 0..1 solo durante i 6s finali del messaggio
     return AnimatedBuilder(
       animation: _destructCtrl,
       builder: (_, __) {
@@ -1492,7 +1480,6 @@ class _ChatBubbleState extends State<_ChatBubble>
           onToggleReaction: widget.onToggleReaction,
           pal: widget.pal,
           reactions: widget.reactions,
-          // 🧨 SELF-DESTRUCT: passa il progress (0..1) — per-messaggio
           destructProgress: progress,
           destructSeed: widget.message.id.hashCode,
         );
@@ -1519,7 +1506,7 @@ class _ChatBubbleVisual extends StatelessWidget {
   final Map<String, int> reactions;
 
   // 🧨 SELF-DESTRUCT
-  final double destructProgress; // 0..1 durante i 6s finali
+  final double destructProgress;
   final int destructSeed;
 
   _ChatBubbleVisual({
@@ -1542,7 +1529,6 @@ class _ChatBubbleVisual extends StatelessWidget {
 
   final GlobalKey _bubbleKey = GlobalKey();
 
-  // ⏱ TTL aggiornato a 10 min (prima era 5)
   String _countdownLeft(DateTime ts) {
     final expiry = ts.add(_kMessageTTL);
     final left = expiry.difference(DateTime.now());
@@ -1556,6 +1542,7 @@ class _ChatBubbleVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final accent = message.category.color;
 
     final Color bubbleBg = isMine ? pal.bubbleMine : pal.bubbleOther;
@@ -1583,7 +1570,7 @@ class _ChatBubbleVisual extends StatelessWidget {
 
     Widget viewsChip() {
       final views = message.views;
-      final label = views <= 0 ? 'Nuovo' : views.toString();
+      final label = views <= 0 ? t.newLabel() : views.toString();
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1608,12 +1595,10 @@ class _ChatBubbleVisual extends StatelessWidget {
       );
     }
 
-    // 🧨 SELF-DESTRUCT: fade morbido sincronizzato allo sgretolamento
     final double fade = destructProgress == 0
         ? 1.0
         : (1.0 - Curves.easeInOut.transform(destructProgress)).clamp(0.0, 1.0);
 
-    // 🧨 SELF-DESTRUCT: costruiamo la bolla “erodibile”
     final bubbleCore = _BubbleCore(
       key: _bubbleKey,
       bubbleBg: bubbleBg,
@@ -1636,7 +1621,6 @@ class _ChatBubbleVisual extends StatelessWidget {
       onOpenReactions: () => onOpenReactions(_bubbleKey),
     );
 
-    // 🧨 SELF-DESTRUCT: Applico erosione + polvere SOLO a questo messaggio
     final erodible = (destructProgress > 0)
         ? _ErodeAndDust(
             progress: destructProgress,
@@ -1657,7 +1641,6 @@ class _ChatBubbleVisual extends StatelessWidget {
           alignment: alignment,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-            // 🧨 SELF-DESTRUCT: Opacity leggera per accompagnare l’erosione
             child: Opacity(opacity: fade, child: erodible),
           ),
         ),
@@ -1666,11 +1649,9 @@ class _ChatBubbleVisual extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// 🧨 SELF-DESTRUCT — Wrapper che buca la bolla e dipinge la “polvere”
-// =============================================================================
+// (Self-destruct visuals unchanged…)
 class _ErodeAndDust extends StatelessWidget {
-  final double progress; // 0..1 nei 6s finali
+  final double progress;
   final int seed;
   final BorderRadius borderRadius;
   final Color dustColor;
@@ -1686,7 +1667,6 @@ class _ErodeAndDust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ClipPath con fori che crescono dai bordi (priorità angoli)
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -1698,7 +1678,6 @@ class _ErodeAndDust extends StatelessWidget {
           ),
           child: child,
         ),
-        // Polvere pochissima, solo nei primi ~2s (~progress<=0.33)
         if (progress > 0 && progress <= 0.9)
           Positioned.fill(
             child: IgnorePointer(
@@ -1716,7 +1695,6 @@ class _ErodeAndDust extends StatelessWidget {
   }
 }
 
-// Genera una forma base (RRect) e sottrae una serie di cerchi “mangiati”.
 class _ErosionClipper extends CustomClipper<Path> {
   final double progress;
   final int seed;
@@ -1744,44 +1722,39 @@ class _ErosionClipper extends CustomClipper<Path> {
     final rnd = math.Random(seed);
     final holes = Path();
 
-    // Numero di “fori” aumenta con il progress
     const int maxHoles = 18;
     final int count = (maxHoles * progress.clamp(0.1, 1.0)).ceil();
 
-    // raggio dei fori cresce con progress, con variabilità
     for (int i = 0; i < count; i++) {
-      // Priorità ai bordi: scegli un lato e una posizione lungo il bordo
-      final side = rnd.nextInt(4); // 0 top, 1 right, 2 bottom, 3 left
+      final side = rnd.nextInt(4);
       final t = rnd.nextDouble();
-      final edgeInset = 2.0 + 8.0 * progress; // inizia sui bordi, avanza dentro
+      final edgeInset = 2.0 + 8.0 * progress;
       double cx, cy;
 
       switch (side) {
-        case 0: // top
+        case 0:
           cx = 8 + t * (size.width - 16);
           cy = edgeInset + rnd.nextDouble() * (8.0 * progress);
           break;
-        case 1: // right
+        case 1:
           cx = size.width - edgeInset - rnd.nextDouble() * (8.0 * progress);
           cy = 8 + t * (size.height - 16);
           break;
-        case 2: // bottom
+        case 2:
           cx = 8 + t * (size.width - 16);
           cy = size.height - edgeInset - rnd.nextDouble() * (8.0 * progress);
           break;
-        default: // left
+        default:
           cx = edgeInset + rnd.nextDouble() * (8.0 * progress);
           cy = 8 + t * (size.height - 16);
       }
 
-      // raggio scala con progress e un po' di rumore
       final baseR = 6.0 + 22.0 * progress;
       final jitter = (rnd.nextDouble() - 0.5) * (8.0 * progress);
       final radius = (baseR + jitter).clamp(3.0, 28.0);
 
       holes.addOval(Rect.fromCircle(center: Offset(cx, cy), radius: radius));
 
-      // qualche micro-foro vicino (trama) per “rumore”
       if (progress > 0.25 && rnd.nextBool()) {
         final int micro = 1 + rnd.nextInt(2);
         for (int k = 0; k < micro; k++) {
@@ -1794,7 +1767,6 @@ class _ErosionClipper extends CustomClipper<Path> {
       }
     }
 
-    // Sottrazione: base - holes
     final clip = Path.combine(PathOperation.difference, base, holes);
     return clip;
   }
@@ -1807,9 +1779,8 @@ class _ErosionClipper extends CustomClipper<Path> {
   }
 }
 
-// Poche particelle molto leggere che si staccano dal bordo e svaniscono.
 class _DustPainter extends CustomPainter {
-  final double progress; // 0..1 nei 6s finali
+  final double progress;
   final int seed;
   final Color color;
 
@@ -1821,7 +1792,6 @@ class _DustPainter extends CustomPainter {
     final rnd = math.Random(seed);
     final paint = Paint()..style = PaintingStyle.fill;
 
-    // Emissione solo nella prima ~metà con curva (lenta → medio → lenta)
     final emitStrength = Curves.easeInOut
         .transform(
           (progress <= 0.66)
@@ -1832,19 +1802,17 @@ class _DustPainter extends CustomPainter {
 
     if (emitStrength <= 0) return;
 
-    const int baseParticles = 24; // poche decine
+    const int baseParticles = 24;
     final num n = (baseParticles * emitStrength).clamp(6, baseParticles);
 
     for (int i = 0; i < n; i++) {
-      // Ogni particella ha un tempo di nascita (0..0.33) e durata 0.6..1.5s (normalizzata)
       final birth = rnd.nextDouble() * 0.33;
-      final life = 0.1 + rnd.nextDouble() * 0.25 + 0.6; // 0.7..0.95 circa
+      final life = 0.1 + rnd.nextDouble() * 0.25 + 0.6;
       final age = progress - birth;
       if (age <= 0 || age > life) continue;
       final t = (age / life).clamp(0.0, 1.0);
       final ease = Curves.easeOut.transform(t);
 
-      // Ancoraggio bordo (come i fori)
       final side = rnd.nextInt(4);
       final s = rnd.nextDouble();
       double ax, ay;
@@ -1865,7 +1833,6 @@ class _DustPainter extends CustomPainter {
           ax = 8;
           ay = 8 + s * (size.height - 16);
       }
-      // direzione leggera verso fuori + soffio laterale
       final outward = switch (side) {
         0 => const Offset(0, -1),
         1 => const Offset(1, 0),
@@ -1875,17 +1842,14 @@ class _DustPainter extends CustomPainter {
       final lateral = Offset(
           (rnd.nextDouble() - 0.5) * 0.6, (rnd.nextDouble() - 0.5) * 0.6);
 
-      // scala movimenti piccola (restano vicino alla bolla)
       final speed = 8.0 + rnd.nextDouble() * 10.0;
       Offset pos = Offset(ax, ay) +
           (outward * (speed * ease)) +
           (lateral * (6.0 * ease));
 
-      // attrazione leggera verso l'ancora (non si allontanano troppo)
       final back = (Offset(ax, ay) - pos) * 0.15 * (1.0 - ease);
       pos += back;
 
-      // gravità quasi nulla
       pos = pos.translate(0, 0.5 * ease);
 
       final radius = 0.8 + rnd.nextDouble() * 1.6;
@@ -1905,7 +1869,7 @@ class _DustPainter extends CustomPainter {
 }
 
 // =============================================================================
-// 💡 Corpo bolla (immutato salvo tap per audio)
+// 💡 Bubble core
 // =============================================================================
 class _BubbleCore extends StatelessWidget {
   final Color bubbleBg;
@@ -1951,6 +1915,8 @@ class _BubbleCore extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+
     final container = Container(
       decoration: BoxDecoration(
         color: bubbleBg,
@@ -1967,7 +1933,7 @@ class _BubbleCore extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header categoria + distanza
+          // Header category + distance
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
             child: Row(
@@ -1996,7 +1962,7 @@ class _BubbleCore extends StatelessWidget {
             ),
           ),
 
-          // Nome utente
+          // Username
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: Row(
@@ -2018,7 +1984,7 @@ class _BubbleCore extends StatelessWidget {
             ),
           ),
 
-          // Corpo (testo o audio)
+          // Body (text or voice)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
             child: message.isText
@@ -2039,7 +2005,7 @@ class _BubbleCore extends StatelessWidget {
                   ),
           ),
 
-          // Reazioni aggregate (se presenti)
+          // Reactions pill
           if (hasReactions)
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
@@ -2054,7 +2020,7 @@ class _BubbleCore extends StatelessWidget {
               ),
             ),
 
-          // Footer: ora + faccina + countdown + views
+          // Footer: time + emoji + countdown + views
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
             child: Row(
@@ -2070,7 +2036,7 @@ class _BubbleCore extends StatelessWidget {
                 ),
                 const Spacer(),
                 Tooltip(
-                  message: 'Reazioni',
+                  message: t.tooltipReactions(),
                   child: IconButton(
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
@@ -2089,8 +2055,6 @@ class _BubbleCore extends StatelessWidget {
       ),
     );
 
-    // ⏯️ TAP breve su QUALSIASI punto della bolla VOCALE per avviare/fermare
-    // (l’IconButton delle reazioni assorbe da solo i tocchi su di lui)
     if (!message.isText) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2102,7 +2066,6 @@ class _BubbleCore extends StatelessWidget {
   }
 }
 
-// Pill reazioni
 class _ReactionsPill extends StatelessWidget {
   final Map<String, int> reactions;
   final bool isMine;
@@ -2170,7 +2133,7 @@ class _ReactionsPill extends StatelessWidget {
 }
 
 // =============================================================================
-// 🎵 Riga audio
+// 🎵 Voice row
 // =============================================================================
 class _VoiceRow extends StatefulWidget {
   final int duration;
@@ -2344,6 +2307,7 @@ class _ComposerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final color = selectedCategory.color;
     final pal = _AdaptivePalette.of(context, accent: color);
 
@@ -2387,7 +2351,7 @@ class _ComposerBar extends StatelessWidget {
                     minLines: 1,
                     maxLength: 250,
                     decoration: InputDecoration(
-                      hintText: 'Scrivi un messaggio (max 250)…',
+                      hintText: t.composerHint(),
                       counterText: '',
                       errorText: textError.isEmpty ? null : textError,
                       contentPadding: const EdgeInsets.symmetric(
@@ -2508,7 +2472,7 @@ class _MicButton extends StatelessWidget {
 }
 
 // =============================================================================
-// 👋 Overlay benvenuto
+// 👋 Welcome overlay
 // =============================================================================
 class _WelcomeOverlay extends StatelessWidget {
   final VoidCallback onClose;
@@ -2516,6 +2480,7 @@ class _WelcomeOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final pal = _AdaptivePalette.of(context);
     return Container(
       color: _alpha(Colors.black, 0.35),
@@ -2534,19 +2499,20 @@ class _WelcomeOverlay extends StatelessWidget {
                 children: [
                   const Icon(Icons.waving_hand, size: 48),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Benvenuto!',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  Text(
+                    t.welcomeTitle(),
+                    style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Completa i dati richiesti per iniziare a usare TalkInZone.',
+                  Text(
+                    t.welcomeBody(),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: onClose,
-                    child: const Text('Ho capito'),
+                    child: Text(t.understood()),
                   ),
                 ],
               ),
