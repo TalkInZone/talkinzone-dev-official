@@ -252,7 +252,7 @@ Future<void> backgroundNotificationHandler() async {
         }
 
         final expirationTime = timestamp.toDate().add(
-              const Duration(minutes: 5),
+              const Duration(minutes: 10),
             );
         if (DateTime.now().isBefore(expirationTime)) {
           debugPrint('⏱️ [BACKGROUND] Messaggio non ancora scaduto, salto');
@@ -935,7 +935,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         _ensureMessageHasName(doc);
 
         final newMessage = VoiceMessage.fromFirestore(doc);
-        final isExpired = now.difference(newMessage.timestamp).inMinutes >= 5;
+        final isExpired = now.difference(newMessage.timestamp).inMinutes >= 10;
 
         // 🆕 salva il nome custom della categoria per filtri locali
         try {
@@ -1097,7 +1097,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     for (final message in messagesToRemove) {
       try {
         final expirationTime =
-            message.timestamp.add(const Duration(minutes: 5));
+            message.timestamp.add(const Duration(minutes: 10));
         if (DateTime.now().isBefore(expirationTime)) {
           debugPrint('⏱️ Messaggio non ancora scaduto, salto');
           continue;
@@ -1347,7 +1347,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   List<VoiceMessage> _getPlayableMessages() {
     final now = DateTime.now();
     final list = _messages.where((m) {
-      final expired = now.difference(m.timestamp).inMinutes >= 5;
+      final expired = now.difference(m.timestamp).inMinutes >= 10;
       if (expired) {
         return false;
       }
@@ -1721,7 +1721,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final filteredMessages = _messages.where((message) {
-      return !(now.difference(message.timestamp).inMinutes >= 5) &&
+      return !(now.difference(message.timestamp).inMinutes >= 10) &&
           !_isHiddenByBlock(message) &&
           _isMessageInRange(message) &&
           _activeFilters.contains(message.category) &&

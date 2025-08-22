@@ -1,5 +1,5 @@
 // =============================================================================
-// 📦 FILE: home_screen_ui.dart
+// 📦 FILE: home_screen_ui.dart  (COMPLETO)
 // =============================================================================
 // ✅ NOVITÀ DI QUESTA VERSIONE
 // - LONG PRESS sulla bolla: SOLO "Segnala" e "Blocca/Ignora".
@@ -10,10 +10,9 @@
 // - 🔧 FIX TAGLIO VERTICALE EMOJI nella pill delle reazioni.
 // - 🔒 BLOCCO: usa la callback esterna se c’è; altrimenti fallback interno
 //   con tentativi multipli su path comuni e messaggi d’errore dettagliati.
-//
-// 🛠 [MOD - tap bolla audio] Tap breve su qualsiasi punto della bolla di un
-//     MESSAGGIO AUDIO (ovunque tranne sull’icona reazioni) avvia/stoppa la
-//     riproduzione. Il long-press resta invariato.
+// - 🧨 SELF-DESTRUCT: animazione di sgretolamento per-messaggio che parte
+//   a 6s dalla scadenza; non influenza gli altri messaggi.
+// - ⏱ TTL: countdown aggiornato a 10 minuti.
 // =============================================================================
 
 import 'dart:async';
@@ -36,6 +35,12 @@ import 'voice_message.dart';
 
 Color _alpha(Color c, double opacity01) =>
     c.withAlpha(((opacity01.clamp(0.0, 1.0)) * 255).round());
+
+// =============================================================================
+// ⏱ TTL & finestra autodistruzione (solo qui, non tocchiamo altri file)
+// =============================================================================
+const Duration _kMessageTTL = Duration(minutes: 10); // ⏱ 10 minuti
+const Duration _kDestructWindow = Duration(seconds: 6); // 🧨 parte a T-6s
 
 // =============================================================================
 // 🎨 Palette adattiva
@@ -1335,6 +1340,7 @@ class _MessagesList extends StatelessWidget {
             );
 
         return _ChatBubble(
+          key: ValueKey(m.id), // 🧨 SELF-DESTRUCT: stato per-messaggio
           message: m,
           isMine: isMine,
           isPlaying: isPlaying,
@@ -1357,7 +1363,7 @@ class _MessagesList extends StatelessWidget {
 // =============================================================================
 // 💬 Chat bubble
 // =============================================================================
-class _ChatBubble extends StatelessWidget {
+class _ChatBubble extends StatefulWidget {
   final VoiceMessage message;
   final bool isMine;
   final bool isPlaying;
@@ -1374,7 +1380,8 @@ class _ChatBubble extends StatelessWidget {
   final _AdaptivePalette pal;
   final Map<String, int> reactions;
 
-  _ChatBubble({
+  const _ChatBubble({
+    super.key,
     required this.message,
     required this.isMine,
     required this.isPlaying,
@@ -1390,10 +1397,154 @@ class _ChatBubble extends StatelessWidget {
     required this.reactions,
   });
 
+  @override
+  State<_ChatBubble> createState() => _ChatBubbleState();
+}
+
+class _ChatBubbleState extends State<_ChatBubble>
+    with SingleTickerProviderStateMixin {
+  // 🧨 SELF-DESTRUCT: controller per animazione per-messaggio
+  late final AnimationController _destructCtrl;
+  Timer? _startTimer;
+  bool _started = false;
+
+  DateTime get _expiry =>
+      widget.message.timestamp.add(_kMessageTTL); // ⏱ usa 10 minuti
+
+  @override
+  void initState() {
+    super.initState();
+    _destructCtrl = AnimationController(
+      vsync: this,
+      duration: _kDestructWindow, // animazione di 6s
+    );
+    _scheduleDestruction();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Se cambia il messaggio (nuovo id) o timestamp, rischedula
+    if (oldWidget.message.id != widget.message.id ||
+        oldWidget.message.timestamp != widget.message.timestamp) {
+      _startTimer?.cancel();
+      _destructCtrl.stop();
+      _destructCtrl.value = 0;
+      _started = false;
+      _scheduleDestruction();
+    }
+  }
+
+  void _scheduleDestruction() {
+    final now = DateTime.now();
+    final startAt = _expiry.subtract(_kDestructWindow);
+    if (now.isAfter(_expiry)) {
+      // già scaduto → salta alla fine
+      _started = true;
+      _destructCtrl.value = 1;
+      return;
+    }
+    if (!now.isBefore(startAt)) {
+      // siamo già dentro la finestra → parte subito con progress allineato
+      final elapsed = now.difference(startAt);
+      final p = (elapsed.inMilliseconds / _kDestructWindow.inMilliseconds)
+          .clamp(0.0, 1.0);
+      _started = true;
+      _destructCtrl.value = p;
+      _destructCtrl.forward();
+      return;
+    }
+    // non ancora nella finestra → timer fino a T-6s
+    final delay = startAt.difference(now);
+    _startTimer = Timer(delay, () {
+      if (!mounted) return;
+      _started = true;
+      _destructCtrl.forward(from: 0);
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _startTimer?.cancel();
+    _destructCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Valore animazione 0..1 solo durante i 6s finali del messaggio
+    return AnimatedBuilder(
+      animation: _destructCtrl,
+      builder: (_, __) {
+        final progress = _started ? _destructCtrl.value : 0.0;
+        return _ChatBubbleVisual(
+          message: widget.message,
+          isMine: widget.isMine,
+          isPlaying: widget.isPlaying,
+          categoryLabel: widget.categoryLabel,
+          userName: widget.userName,
+          distanceLabel: widget.distanceLabel,
+          timeLabel: widget.timeLabel,
+          onPlay: widget.onPlay,
+          onLongPress: widget.onLongPress,
+          onOpenReactions: widget.onOpenReactions,
+          onToggleReaction: widget.onToggleReaction,
+          pal: widget.pal,
+          reactions: widget.reactions,
+          // 🧨 SELF-DESTRUCT: passa il progress (0..1) — per-messaggio
+          destructProgress: progress,
+          destructSeed: widget.message.id.hashCode,
+        );
+      },
+    );
+  }
+}
+
+class _ChatBubbleVisual extends StatelessWidget {
+  final VoiceMessage message;
+  final bool isMine;
+  final bool isPlaying;
+
+  final String categoryLabel;
+  final String userName;
+  final String distanceLabel;
+  final String timeLabel;
+
+  final VoidCallback onPlay;
+  final void Function(GlobalKey) onLongPress;
+  final void Function(GlobalKey) onOpenReactions;
+  final void Function(String emoji) onToggleReaction;
+  final _AdaptivePalette pal;
+  final Map<String, int> reactions;
+
+  // 🧨 SELF-DESTRUCT
+  final double destructProgress; // 0..1 durante i 6s finali
+  final int destructSeed;
+
+  _ChatBubbleVisual({
+    required this.message,
+    required this.isMine,
+    required this.isPlaying,
+    required this.categoryLabel,
+    required this.userName,
+    required this.distanceLabel,
+    required this.timeLabel,
+    required this.onPlay,
+    required this.onLongPress,
+    required this.onOpenReactions,
+    required this.onToggleReaction,
+    required this.pal,
+    required this.reactions,
+    required this.destructProgress,
+    required this.destructSeed,
+  });
+
   final GlobalKey _bubbleKey = GlobalKey();
 
+  // ⏱ TTL aggiornato a 10 min (prima era 5)
   String _countdownLeft(DateTime ts) {
-    final expiry = ts.add(const Duration(minutes: 5));
+    final expiry = ts.add(_kMessageTTL);
     final left = expiry.difference(DateTime.now());
     final total = left.isNegative ? Duration.zero : left;
     final m = total.inMinutes;
@@ -1457,46 +1608,57 @@ class _ChatBubble extends StatelessWidget {
       );
     }
 
+    // 🧨 SELF-DESTRUCT: fade morbido sincronizzato allo sgretolamento
+    final double fade = destructProgress == 0
+        ? 1.0
+        : (1.0 - Curves.easeInOut.transform(destructProgress)).clamp(0.0, 1.0);
+
+    // 🧨 SELF-DESTRUCT: costruiamo la bolla “erodibile”
+    final bubbleCore = _BubbleCore(
+      key: _bubbleKey,
+      bubbleBg: bubbleBg,
+      borderRadius: borderRadius,
+      accent: accent,
+      message: message,
+      categoryLabel: categoryLabel,
+      distanceLabel: distanceLabel,
+      userName: userName,
+      textColor: textColor,
+      isMine: isMine,
+      hasReactions: hasReactions,
+      reactions: reactions,
+      pal: pal,
+      timeLabel: timeLabel,
+      countdownChip: countdownChip,
+      viewsChip: viewsChip,
+      onPlay: onPlay,
+      isPlaying: isPlaying,
+      onOpenReactions: () => onOpenReactions(_bubbleKey),
+    );
+
+    // 🧨 SELF-DESTRUCT: Applico erosione + polvere SOLO a questo messaggio
+    final erodible = (destructProgress > 0)
+        ? _ErodeAndDust(
+            progress: destructProgress,
+            seed: destructSeed,
+            borderRadius: borderRadius,
+            // ignore: deprecated_member_use
+            dustColor: pal.onSurface.withOpacity(0.18),
+            child: bubbleCore,
+          )
+        : bubbleCore;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        // [MOD] Tap breve sulla bolla:
-        //      Se NON è un messaggio di testo => è audio -> avvia/ferma riproduzione.
-        //      L'IconButton delle reazioni (figlio) intercetta il suo tap,
-        //      quindi qui non si entra quando si tocca l’icona.
-        onTap: () {
-          if (!message.isText) {
-            onPlay();
-          }
-        },
-        // [INVARIATO] long-press per menu azioni (Segnala/Blocca)
         onLongPress: () => onLongPress(_bubbleKey),
         child: Align(
           alignment: alignment,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-            child: _BubbleCore(
-              key: _bubbleKey,
-              bubbleBg: bubbleBg,
-              borderRadius: borderRadius,
-              accent: accent,
-              message: message,
-              categoryLabel: categoryLabel,
-              distanceLabel: distanceLabel,
-              userName: userName,
-              textColor: textColor,
-              isMine: isMine,
-              hasReactions: hasReactions,
-              reactions: reactions,
-              pal: pal,
-              timeLabel: timeLabel,
-              countdownChip: countdownChip,
-              viewsChip: viewsChip,
-              onPlay: onPlay,
-              isPlaying: isPlaying,
-              onOpenReactions: () => onOpenReactions(_bubbleKey),
-            ),
+            // 🧨 SELF-DESTRUCT: Opacity leggera per accompagnare l’erosione
+            child: Opacity(opacity: fade, child: erodible),
           ),
         ),
       ),
@@ -1504,6 +1666,247 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
+// =============================================================================
+// 🧨 SELF-DESTRUCT — Wrapper che buca la bolla e dipinge la “polvere”
+// =============================================================================
+class _ErodeAndDust extends StatelessWidget {
+  final double progress; // 0..1 nei 6s finali
+  final int seed;
+  final BorderRadius borderRadius;
+  final Color dustColor;
+  final Widget child;
+
+  const _ErodeAndDust({
+    required this.progress,
+    required this.seed,
+    required this.borderRadius,
+    required this.dustColor,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // ClipPath con fori che crescono dai bordi (priorità angoli)
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipPath(
+          clipper: _ErosionClipper(
+            progress: progress,
+            seed: seed,
+            borderRadius: borderRadius,
+          ),
+          child: child,
+        ),
+        // Polvere pochissima, solo nei primi ~2s (~progress<=0.33)
+        if (progress > 0 && progress <= 0.9)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _DustPainter(
+                  progress: progress,
+                  seed: seed ^ 0x9E3779B9,
+                  color: dustColor,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// Genera una forma base (RRect) e sottrae una serie di cerchi “mangiati”.
+class _ErosionClipper extends CustomClipper<Path> {
+  final double progress;
+  final int seed;
+  final BorderRadius borderRadius;
+
+  _ErosionClipper({
+    required this.progress,
+    required this.seed,
+    required this.borderRadius,
+  });
+
+  @override
+  Path getClip(Size size) {
+    final base = Path()
+      ..addRRect(
+        RRect.fromRectAndCorners(
+          Offset.zero & size,
+          topLeft: borderRadius.topLeft,
+          topRight: borderRadius.topRight,
+          bottomLeft: borderRadius.bottomLeft,
+          bottomRight: borderRadius.bottomRight,
+        ),
+      );
+
+    final rnd = math.Random(seed);
+    final holes = Path();
+
+    // Numero di “fori” aumenta con il progress
+    const int maxHoles = 18;
+    final int count = (maxHoles * progress.clamp(0.1, 1.0)).ceil();
+
+    // raggio dei fori cresce con progress, con variabilità
+    for (int i = 0; i < count; i++) {
+      // Priorità ai bordi: scegli un lato e una posizione lungo il bordo
+      final side = rnd.nextInt(4); // 0 top, 1 right, 2 bottom, 3 left
+      final t = rnd.nextDouble();
+      final edgeInset = 2.0 + 8.0 * progress; // inizia sui bordi, avanza dentro
+      double cx, cy;
+
+      switch (side) {
+        case 0: // top
+          cx = 8 + t * (size.width - 16);
+          cy = edgeInset + rnd.nextDouble() * (8.0 * progress);
+          break;
+        case 1: // right
+          cx = size.width - edgeInset - rnd.nextDouble() * (8.0 * progress);
+          cy = 8 + t * (size.height - 16);
+          break;
+        case 2: // bottom
+          cx = 8 + t * (size.width - 16);
+          cy = size.height - edgeInset - rnd.nextDouble() * (8.0 * progress);
+          break;
+        default: // left
+          cx = edgeInset + rnd.nextDouble() * (8.0 * progress);
+          cy = 8 + t * (size.height - 16);
+      }
+
+      // raggio scala con progress e un po' di rumore
+      final baseR = 6.0 + 22.0 * progress;
+      final jitter = (rnd.nextDouble() - 0.5) * (8.0 * progress);
+      final radius = (baseR + jitter).clamp(3.0, 28.0);
+
+      holes.addOval(Rect.fromCircle(center: Offset(cx, cy), radius: radius));
+
+      // qualche micro-foro vicino (trama) per “rumore”
+      if (progress > 0.25 && rnd.nextBool()) {
+        final int micro = 1 + rnd.nextInt(2);
+        for (int k = 0; k < micro; k++) {
+          final dx = (rnd.nextDouble() - 0.5) * (radius * 0.8);
+          final dy = (rnd.nextDouble() - 0.5) * (radius * 0.8);
+          final rr = radius * (0.25 + rnd.nextDouble() * 0.25);
+          holes.addOval(
+              Rect.fromCircle(center: Offset(cx + dx, cy + dy), radius: rr));
+        }
+      }
+    }
+
+    // Sottrazione: base - holes
+    final clip = Path.combine(PathOperation.difference, base, holes);
+    return clip;
+  }
+
+  @override
+  bool shouldReclip(covariant _ErosionClipper oldClipper) {
+    return oldClipper.progress != progress ||
+        oldClipper.seed != seed ||
+        oldClipper.borderRadius != borderRadius;
+  }
+}
+
+// Poche particelle molto leggere che si staccano dal bordo e svaniscono.
+class _DustPainter extends CustomPainter {
+  final double progress; // 0..1 nei 6s finali
+  final int seed;
+  final Color color;
+
+  _DustPainter(
+      {required this.progress, required this.seed, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rnd = math.Random(seed);
+    final paint = Paint()..style = PaintingStyle.fill;
+
+    // Emissione solo nella prima ~metà con curva (lenta → medio → lenta)
+    final emitStrength = Curves.easeInOut
+        .transform(
+          (progress <= 0.66)
+              ? (progress / 0.66)
+              : (1.0 - (progress - 0.66) / 0.34),
+        )
+        .clamp(0.0, 1.0);
+
+    if (emitStrength <= 0) return;
+
+    const int baseParticles = 24; // poche decine
+    final num n = (baseParticles * emitStrength).clamp(6, baseParticles);
+
+    for (int i = 0; i < n; i++) {
+      // Ogni particella ha un tempo di nascita (0..0.33) e durata 0.6..1.5s (normalizzata)
+      final birth = rnd.nextDouble() * 0.33;
+      final life = 0.1 + rnd.nextDouble() * 0.25 + 0.6; // 0.7..0.95 circa
+      final age = progress - birth;
+      if (age <= 0 || age > life) continue;
+      final t = (age / life).clamp(0.0, 1.0);
+      final ease = Curves.easeOut.transform(t);
+
+      // Ancoraggio bordo (come i fori)
+      final side = rnd.nextInt(4);
+      final s = rnd.nextDouble();
+      double ax, ay;
+      switch (side) {
+        case 0:
+          ax = 8 + s * (size.width - 16);
+          ay = 8;
+          break;
+        case 1:
+          ax = size.width - 8;
+          ay = 8 + s * (size.height - 16);
+          break;
+        case 2:
+          ax = 8 + s * (size.width - 16);
+          ay = size.height - 8;
+          break;
+        default:
+          ax = 8;
+          ay = 8 + s * (size.height - 16);
+      }
+      // direzione leggera verso fuori + soffio laterale
+      final outward = switch (side) {
+        0 => const Offset(0, -1),
+        1 => const Offset(1, 0),
+        2 => const Offset(0, 1),
+        _ => const Offset(-1, 0),
+      };
+      final lateral = Offset(
+          (rnd.nextDouble() - 0.5) * 0.6, (rnd.nextDouble() - 0.5) * 0.6);
+
+      // scala movimenti piccola (restano vicino alla bolla)
+      final speed = 8.0 + rnd.nextDouble() * 10.0;
+      Offset pos = Offset(ax, ay) +
+          (outward * (speed * ease)) +
+          (lateral * (6.0 * ease));
+
+      // attrazione leggera verso l'ancora (non si allontanano troppo)
+      final back = (Offset(ax, ay) - pos) * 0.15 * (1.0 - ease);
+      pos += back;
+
+      // gravità quasi nulla
+      pos = pos.translate(0, 0.5 * ease);
+
+      final radius = 0.8 + rnd.nextDouble() * 1.6;
+      final alpha = (0.22 * (1.0 - t)).clamp(0.0, 0.22);
+      // ignore: deprecated_member_use
+      paint.color = color.withOpacity(alpha);
+      canvas.drawCircle(pos, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DustPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.seed != seed ||
+        oldDelegate.color != color;
+  }
+}
+
+// =============================================================================
+// 💡 Corpo bolla (immutato salvo tap per audio)
+// =============================================================================
 class _BubbleCore extends StatelessWidget {
   final Color bubbleBg;
   final BorderRadius borderRadius;
@@ -1548,7 +1951,7 @@ class _BubbleCore extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final container = Container(
       decoration: BoxDecoration(
         color: bubbleBg,
         borderRadius: borderRadius,
@@ -1671,8 +2074,6 @@ class _BubbleCore extends StatelessWidget {
                   child: IconButton(
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
-                    // [NOTA] Questo IconButton intercetta il suo tap,
-                    // quindi il GestureDetector padre NON riceve l’evento.
                     onPressed: onOpenReactions,
                     icon: const Icon(Icons.emoji_emotions_outlined),
                   ),
@@ -1687,6 +2088,17 @@ class _BubbleCore extends StatelessWidget {
         ],
       ),
     );
+
+    // ⏯️ TAP breve su QUALSIASI punto della bolla VOCALE per avviare/fermare
+    // (l’IconButton delle reazioni assorbe da solo i tocchi su di lui)
+    if (!message.isText) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPlay,
+        child: container,
+      );
+    }
+    return container;
   }
 }
 
