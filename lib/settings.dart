@@ -11,8 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_constants.dart';
 import 'app_theme.dart';
-// ⬇️ i18n: controller lingua
-import 'i18n/app_locale.dart';
+import 'package:myapp/gen_l10n/app_localizations.dart';
 
 // Piccolo modello per la UI della lista bloccati.
 class BlockedUser {
@@ -40,7 +39,7 @@ class SettingsScreenState extends State<SettingsScreen> {
   AppTheme _currentTheme = AppTheme.light;
 
   // Lingua (UI locale corrente)
-  Locale _currentLocale = AppLocaleController.instance.locale;
+  Locale _currentLocale = AppThemeController.instance.locale;
   late final VoidCallback _localeListener;
 
   // Categoria personalizzata
@@ -71,16 +70,16 @@ class SettingsScreenState extends State<SettingsScreen> {
     // ⬇️ ascolta cambi lingua per aggiornare le Radio
     _localeListener = () {
       if (mounted) {
-        setState(() => _currentLocale = AppLocaleController.instance.locale);
+        setState(() => _currentLocale = AppThemeController.instance.locale);
       }
     };
-    AppLocaleController.instance.addListener(_localeListener);
+    AppThemeController.instance.addListener(_localeListener);
   }
 
   @override
   void dispose() {
     _myDocSub?.cancel();
-    AppLocaleController.instance.removeListener(_localeListener);
+    AppThemeController.instance.removeListener(_localeListener);
     super.dispose();
   }
 
@@ -115,25 +114,29 @@ class SettingsScreenState extends State<SettingsScreen> {
       final status = await Permission.notification.status;
       if (!status.isGranted) {
         final ns = await Permission.notification.request();
-        setState(() => _notificationPermissionGranted = ns.isGranted);
-        if (!ns.isGranted) {
-          _showSettingsDialog(
-            title: 'Autorizzazione richiesta',
-            message:
-                'Per ricevere notifiche, abilita i permessi nelle impostazioni di sistema.',
-          );
+        if (mounted) {
+          setState(() => _notificationPermissionGranted = ns.isGranted);
         }
-      } else {
+        if (!ns.isGranted && mounted) {
+          final l10n = AppLocalizations.of(context);
+          _showSettingsDialog(
+            title: l10n.permissionRequired,
+            message: l10n.notificationPermissionMessage,
+          );
+                }
+      } else if (mounted) {
         setState(() => _notificationPermissionGranted = true);
       }
-    } else {
+    } else if (mounted) {
       setState(() => _notificationPermissionGranted = true);
     }
   }
 
   Future<void> _checkBatteryOptimization() async {
     final status = await Permission.ignoreBatteryOptimizations.status;
-    setState(() => _isBatteryUnrestricted = status.isGranted);
+    if (mounted) {
+      setState(() => _isBatteryUnrestricted = status.isGranted);
+    }
   }
 
   Future<void> _requestIgnoreBatteryOptimization() async {
@@ -146,11 +149,13 @@ class SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _checkLocationPermission() async {
     final permission = await Geolocator.checkPermission();
-    setState(() {
-      _locationPermissionGranted =
-          permission == LocationPermission.whileInUse ||
-              permission == LocationPermission.always;
-    });
+    if (mounted) {
+      setState(() {
+        _locationPermissionGranted =
+            permission == LocationPermission.whileInUse ||
+                permission == LocationPermission.always;
+      });
+    }
   }
 
   Future<void> _requestLocationPermission() async {
@@ -158,42 +163,45 @@ class SettingsScreenState extends State<SettingsScreen> {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    if (permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.deniedForever && mounted) {
+      final l10n = AppLocalizations.of(context);
       _showSettingsDialog(
-        title: 'Permesso posizione richiesto',
-        message:
-            'Per abilitare le funzionalità GPS, consenti l\'accesso alla posizione nelle impostazioni.',
+        title: l10n.locationPermissionRequired,
+        message: l10n.locationPermissionMessage,
       );
-      setState(() => _locationPermissionGranted = false);
+          setState(() => _locationPermissionGranted = false);
       return;
     }
-    setState(() {
-      _locationPermissionGranted =
-          permission == LocationPermission.whileInUse ||
-              permission == LocationPermission.always;
-    });
+    if (mounted) {
+      setState(() {
+        _locationPermissionGranted =
+            permission == LocationPermission.whileInUse ||
+                permission == LocationPermission.always;
+      });
+    }
   }
 
   void _showSettingsDialog({required String title, required String message}) {
+    final l10n = AppLocalizations.of(context);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-          TextButton(
-            onPressed: () async {
-              await openAppSettings();
-              if (!mounted) return;
-              // ignore: use_build_context_synchronously
-              Navigator.pop(context);
-            },
-            child: const Text('IMPOSTAZIONI'),
-          ),
+     TextButton(
+  onPressed: () async {
+    final nav = Navigator.of(context);
+    final canPop = Navigator.canPop(context);
+    
+    await openAppSettings();
+    
+    if (!mounted || !canPop) return;
+    nav.pop();
+  },
+  child: Text(l10n.settings),
+)
         ],
       ),
     );
@@ -201,137 +209,155 @@ class SettingsScreenState extends State<SettingsScreen> {
 
   // ----------------- Listener su `utenti/<me>` -----------------
   Future<void> _attachBlockedListener() async {
-    final prefs = await SharedPreferences.getInstance();
-    final authUid = _auth.currentUser?.uid;
-    final prefsUid = prefs.getString('user_id') ?? '';
+  final prefs = await SharedPreferences.getInstance();
+  final authUid = _auth.currentUser?.uid;
+  final prefsUid = prefs.getString('user_id') ?? '';
 
-    late final String myUid;
-    if (authUid != null && authUid.isNotEmpty) {
-      myUid = authUid;
-    } else {
-      myUid = prefsUid;
-    }
+  late final String myUid;
+  if (authUid != null && authUid.isNotEmpty) {
+    myUid = authUid;
+  } else {
+    myUid = prefsUid;
+  }
 
-    if (myUid.isEmpty) {
+  if (myUid.isEmpty) {
+    if (mounted) {
       setState(() {
         _myUid = null;
         _loadingBlocked = false;
         _blockedUsers = [];
       });
-      return;
     }
+    return;
+  }
 
+  if (mounted) {
     setState(() {
       _myUid = myUid;
       _loadingBlocked = true;
     });
+  }
 
-    _myDocSub?.cancel();
-    _myDocSub =
-        _fs.collection('utenti').doc(myUid).snapshots().listen((snap) async {
-      final data = snap.data() ?? <String, dynamic>{};
+  _myDocSub?.cancel();
+  _myDocSub =
+      _fs.collection('utenti').doc(myUid).snapshots().listen((snap) async {
+    // Verifica se il widget è ancora montato prima di procedere
+    if (!mounted) return;
+    
+    final data = snap.data() ?? <String, dynamic>{};
 
-      final rawIds = (data['id_bloccati'] as List<dynamic>?) ?? const [];
-      final blockedIds =
-          rawIds.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet();
-      blockedIds.remove(myUid);
+    final rawIds = (data['id_bloccati'] as List<dynamic>?) ?? const [];
+    final blockedIds =
+        rawIds.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet();
+    blockedIds.remove(myUid);
 
-      final initial = blockedIds
-          .map((uid) => BlockedUser(
-                uid: uid,
-                name: _volatileNameCache[uid] ?? 'Anonimo',
-                photoUrl: null,
-              ))
-          .toList()
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    // Ottieni le localizzazioni solo dopo aver verificato che il widget è montato
+    final l10n = AppLocalizations.of(context);
+    final initial = blockedIds
+        .map((uid) => BlockedUser(
+              uid: uid,
+              name: _volatileNameCache[uid] ?? (l10n.anonymous),
+              photoUrl: null,
+            ))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
-      if (!mounted) return;
-      setState(() {
-        _blockedUsers = initial;
-        _loadingBlocked = false;
-      });
-
-      await _backfillNamesFromRecentMessages(blockedIds);
-    }, onError: (e) {
-      if (!mounted) return;
-      setState(() {
-        _loadingBlocked = false;
-        _blockedUsers = [];
-      });
+    if (!mounted) return;
+    setState(() {
+      _blockedUsers = initial;
+      _loadingBlocked = false;
     });
-  }
 
-  Future<void> _backfillNamesFromRecentMessages(Set<String> targetUids) async {
-    if (targetUids.isEmpty) return;
+    await _backfillNamesFromRecentMessages(blockedIds);
+  }, onError: (e) {
+    if (!mounted) return;
+    setState(() {
+      _loadingBlocked = false;
+      _blockedUsers = [];
+    });
+  });
+}
 
-    final missing = targetUids
-        .where((uid) => (_volatileNameCache[uid] ?? '').isEmpty)
-        .toSet();
-    if (missing.isEmpty) return;
+Future<void> _backfillNamesFromRecentMessages(Set<String> targetUids) async {
+  if (targetUids.isEmpty) return;
 
-    try {
-      final q = await _fs
-          .collection('messages')
-          .orderBy('timestamp', descending: true)
-          .limit(500)
-          .get();
+  final missing = targetUids
+      .where((uid) => (_volatileNameCache[uid] ?? '').isEmpty)
+      .toSet();
+  if (missing.isEmpty) return;
 
-      final Map<String, String> found = {};
-      for (final d in q.docs) {
-        final m = d.data();
-        final sid = (m['senderId'] as String?) ?? '';
-        if (!missing.contains(sid)) continue;
-        if (found.containsKey(sid)) continue;
+  try {
+    final q = await _fs
+        .collection('messages')
+        .orderBy('timestamp', descending: true)
+        .limit(500)
+        .get();
 
-        final rawName = (m['name'] as String?)?.trim() ?? '';
-        if (rawName.isNotEmpty && rawName.toLowerCase() != 'anonimo') {
-          found[sid] = rawName;
-          if (found.length == missing.length) break;
-        }
+    // Ottieni le localizzazioni in modo sicuro controllando mounted
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    
+    final Map<String, String> found = {};
+    for (final d in q.docs) {
+      final m = d.data();
+      final sid = (m['senderId'] as String?) ?? '';
+      if (!missing.contains(sid)) continue;
+      if (found.containsKey(sid)) continue;
+
+      final rawName = (m['name'] as String?)?.trim() ?? '';
+      final anonymousText = l10n.anonymous;
+      if (rawName.isNotEmpty && rawName.toLowerCase() != anonymousText.toLowerCase()) {
+        found[sid] = rawName;
+        if (found.length == missing.length) break;
       }
+    }
 
-      if (found.isEmpty) return;
+    if (found.isEmpty) return;
 
-      found.forEach((uid, name) {
-        _volatileNameCache[uid] = name;
-      });
+    found.forEach((uid, name) {
+      _volatileNameCache[uid] = name;
+    });
 
-      if (!mounted) return;
-      setState(() {
-        _blockedUsers = _blockedUsers.map((u) {
-          final cached = _volatileNameCache[u.uid];
-          if (cached != null && cached.isNotEmpty) {
-            return BlockedUser(uid: u.uid, name: cached, photoUrl: u.photoUrl);
-          }
-          return u;
-        }).toList()
-          ..sort(
-              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      });
-    } catch (_) {/* Ignore */}
-  }
+    if (!mounted) return;
+    setState(() {
+      _blockedUsers = _blockedUsers.map((u) {
+        final cached = _volatileNameCache[u.uid];
+        if (cached != null && cached.isNotEmpty) {
+          return BlockedUser(uid: u.uid, name: cached, photoUrl: u.photoUrl);
+        }
+        return u;
+      }).toList()
+        ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    });
+  } catch (_) {/* Ignore */}
+}
 
   Future<void> _unblockUser(BlockedUser u) async {
     if (_myUid == null || _myUid!.isEmpty) return;
     try {
-      setState(() {
-        _blockedUsers = _blockedUsers.where((x) => x.uid != u.uid).toList();
-      });
+      if (mounted) {
+        setState(() {
+          _blockedUsers = _blockedUsers.where((x) => x.uid != u.uid).toList();
+        });
+      }
 
       await _fs.collection('utenti').doc(_myUid!).set({
         'id_bloccati': FieldValue.arrayRemove([u.uid])
       }, SetOptions(merge: true));
 
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Hai sbloccato ${u.name}')),
+        SnackBar(content: Text('${l10n.unblock} ${u.name}')),
       );
-    } catch (e) {
+        } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Errore durante lo sblocco. Riprova.')),
+        SnackBar(content: Text(l10n.genericError)),
       );
-    }
+        }
   }
 
   Widget _avatarFor(BlockedUser u) {
@@ -355,11 +381,13 @@ class SettingsScreenState extends State<SettingsScreen> {
   // ------------------------------ UI ---------------------------
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Impostazioni'),
+        title: Text(l10n.settingsTitle),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -368,7 +396,7 @@ class SettingsScreenState extends State<SettingsScreen> {
           children: [
             // ---------- Tema ----------
             Text(
-              'Tema',
+              l10n.themeLabel,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -384,7 +412,7 @@ class SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 children: [
                   RadioListTile<AppTheme>(
-                    title: const Text('Light'),
+                    title: Text(l10n.lightTheme),
                     value: AppTheme.light,
                     groupValue: _currentTheme,
                     onChanged: (v) async {
@@ -395,7 +423,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const Divider(height: 1),
                   RadioListTile<AppTheme>(
-                    title: const Text('Dark'),
+                    title: Text(l10n.darkTheme),
                     value: AppTheme.dark,
                     groupValue: _currentTheme,
                     onChanged: (v) async {
@@ -406,8 +434,8 @@ class SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const Divider(height: 1),
                   RadioListTile<AppTheme>(
-                    title: const Text('Grey'),
-                    subtitle: const Text('Palette neutra in chiaro/scuro'),
+                    title: Text(l10n.greyTheme),
+                    subtitle: Text(l10n.greyThemeDescription),
                     value: AppTheme.grey,
                     groupValue: _currentTheme,
                     onChanged: (v) async {
@@ -424,7 +452,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
             // ---------- Lingua ----------
             Text(
-              'Lingua / Language',
+              l10n.languageLabel,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -440,22 +468,22 @@ class SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 children: [
                   RadioListTile<Locale>(
-                    title: const Text('English'),
+                    title: Text(l10n.english),
                     value: const Locale('en'),
                     groupValue: _currentLocale,
                     onChanged: (l) {
                       if (l == null) return;
-                      AppLocaleController.instance.setLocale(l);
+                      AppThemeController.instance.setLocale(l);
                     },
                   ),
                   const Divider(height: 1),
                   RadioListTile<Locale>(
-                    title: const Text('Italiano'),
+                    title: Text(l10n.italian),
                     value: const Locale('it'),
                     groupValue: _currentLocale,
                     onChanged: (l) {
                       if (l == null) return;
-                      AppLocaleController.instance.setLocale(l);
+                      AppThemeController.instance.setLocale(l);
                     },
                   ),
                 ],
@@ -466,7 +494,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
             // ---------- Notifiche ----------
             Text(
-              'Gestione Notifiche',
+              l10n.notificationsLabel,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -480,11 +508,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
-                title: const Text('Abilita notifiche'),
+                title: Text(l10n.enableNotifications),
                 subtitle: Text(
                   _notificationPermissionGranted
-                      ? 'Autorizzazione concessa'
-                      : 'Richiedi autorizzazione per le notifiche',
+                      ? l10n.authorizationGranted
+                      : l10n.requestAuthorization,
                 ),
                 value: _notificationPermissionGranted,
                 onChanged: (_) => _requestNotificationPermission(),
@@ -497,10 +525,8 @@ class SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
-                title: const Text('Suono di notifica'),
-                subtitle: const Text(
-                  'Riproduci un suono quando arriva un nuovo messaggio',
-                ),
+                title: Text(l10n.notificationSound),
+                subtitle: Text(l10n.notificationSoundDescription),
                 value: _notificationSoundEnabled,
                 onChanged: _setNotificationSound,
                 secondary: const Icon(Icons.notifications_active),
@@ -512,11 +538,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
-                title: const Text('Esecuzione in background'),
+                title: Text(l10n.backgroundExecution),
                 subtitle: Text(
                   _isBatteryUnrestricted
-                      ? 'Ottimizzazione batteria disattivata'
-                      : 'L\'app potrebbe non ricevere notifiche in background',
+                      ? l10n.batteryOptimizationDisabled
+                      : l10n.batteryOptimizationWarning,
                 ),
                 value: _isBatteryUnrestricted,
                 onChanged: (_) => _requestIgnoreBatteryOptimization(),
@@ -524,11 +550,11 @@ class SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Text(
-                'Le notifiche in background richiedono di disattivare l’ottimizzazione batteria per questa app.',
-                style: TextStyle(fontSize: 14),
+                l10n.batteryOptimizationWarning,
+                style: const TextStyle(fontSize: 14),
               ),
             ),
 
@@ -536,7 +562,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
             // ---------- GPS ----------
             Text(
-              'Gestione GPS',
+              l10n.gpsManagement,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -550,11 +576,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SwitchListTile(
-                title: const Text('Abilita accesso alla posizione'),
+                title: Text(l10n.enableLocation),
                 subtitle: Text(
                   _locationPermissionGranted
-                      ? 'Accesso alla posizione abilitato'
-                      : 'Richiedi autorizzazione GPS',
+                      ? l10n.locationAccessEnabled
+                      : l10n.requestGpsAuthorization,
                 ),
                 value: _locationPermissionGranted,
                 onChanged: (_) => _requestLocationPermission(),
@@ -566,7 +592,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
             // ---------- Categoria personalizzata ----------
             Text(
-              'Categoria personalizzata',
+              l10n.customCategory,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -581,24 +607,24 @@ class SettingsScreenState extends State<SettingsScreen> {
               ),
               child: ListTile(
                 leading: const Icon(Icons.tag),
-                title: const Text('Nome categoria personalizzata'),
+                title: Text(l10n.customCategoryName),
                 subtitle: Text(
                   (_customCategoryName == null ||
                           (_customCategoryName ?? '').isEmpty)
-                      ? 'Nessuna — tocca per impostare'
-                      : 'Attiva: ${_customCategoryName ?? ''}',
+                      ? l10n.noCategorySet
+                      : '${l10n.activeCategory}: ${_customCategoryName ?? ''}',
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if ((_customCategoryName ?? '').isNotEmpty)
                       IconButton(
-                        tooltip: 'Rimuovi',
+                        tooltip: l10n.remove,
                         onPressed: () => _saveCustomCategoryName(null),
                         icon: const Icon(Icons.clear),
                       ),
                     IconButton(
-                      tooltip: 'Modifica',
+                      tooltip: l10n.edit,
                       onPressed: _showCustomNameDialog,
                       icon: const Icon(Icons.edit),
                     ),
@@ -612,7 +638,7 @@ class SettingsScreenState extends State<SettingsScreen> {
 
             // ---------- Utenti bloccati ----------
             Text(
-              'Utenti bloccati',
+              l10n.blockedUsers,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -633,9 +659,9 @@ class SettingsScreenState extends State<SettingsScreen> {
                         child: Center(child: CircularProgressIndicator()),
                       )
                     : (_blockedUsers.isEmpty
-                        ? const ListTile(
-                            leading: Icon(Icons.info_outline),
-                            title: Text('Nessun utente bloccato.'),
+                        ? ListTile(
+                            leading: const Icon(Icons.info_outline),
+                            title: Text(l10n.noBlockedUsers),
                           )
                         : ListView.separated(
                             shrinkWrap: true,
@@ -655,7 +681,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                                 trailing: TextButton.icon(
                                   onPressed: () => _unblockUser(u),
                                   icon: const Icon(Icons.block),
-                                  label: const Text('Sblocca'),
+                                  label: Text(l10n.unblock),
                                   style: TextButton.styleFrom(
                                     foregroundColor: Colors.red,
                                   ),
@@ -667,10 +693,10 @@ class SettingsScreenState extends State<SettingsScreen> {
             ),
 
             const SizedBox(height: 28),
-            const Center(
+            Center(
               child: Text(
-                'Versione App: $appVersion',
-                style: TextStyle(
+                '${l10n.appVersion}: $appVersion',
+                style: const TextStyle(
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -683,30 +709,34 @@ class SettingsScreenState extends State<SettingsScreen> {
 
   // ---------- Categoria personalizzata: salva ----------
   Future<void> _saveCustomCategoryName(String? value) async {
+    final l10n = AppLocalizations.of(context);
+    
     final prefs = await SharedPreferences.getInstance();
     final trimmed = (value ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
     if (trimmed.isEmpty) {
       await prefs.remove('custom_category_name');
-      setState(() => _customCategoryName = null);
       if (mounted) {
+        setState(() => _customCategoryName = null);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Categoria personalizzata disattivata')),
+          SnackBar(content: Text(l10n.customCategoryDisabled)),
         );
       }
       return;
     }
     final limited = trimmed.length > 32 ? trimmed.substring(0, 32) : trimmed;
     await prefs.setString('custom_category_name', limited);
-    setState(() => _customCategoryName = limited);
     if (mounted) {
+      setState(() => _customCategoryName = limited);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Categoria personalizzata impostata: $limited')),
+        SnackBar(content: Text('${l10n.customCategorySet}: $limited')),
       );
     }
   }
 
   // ---------- Categoria personalizzata: dialog ----------
   Future<void> _showCustomNameDialog() async {
+    final l10n = AppLocalizations.of(context);
+    
     final controller = TextEditingController(text: _customCategoryName ?? '');
     String? errorText;
 
@@ -714,14 +744,11 @@ class SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) => AlertDialog(
-          title: const Text('Categoria personalizzata'),
+          title: Text(l10n.customCategoryDialogTitle),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Imposta il nome della tua categoria personalizzata. '
-                'Solo i messaggi con esattamente lo stesso nome saranno visibili nei filtri.',
-              ),
+              Text(l10n.customCategoryDialogDescription),
               const SizedBox(height: 12),
               TextField(
                 controller: controller,
@@ -729,7 +756,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                 maxLength: 32,
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
-                  hintText: 'Es. “Runner Milano Nord”',
+                  hintText: l10n.customCategoryHint,
                   counterText: '',
                   border: const OutlineInputBorder(),
                   errorText: errorText,
@@ -744,24 +771,23 @@ class SettingsScreenState extends State<SettingsScreen> {
                 Navigator.of(context).pop();
                 _saveCustomCategoryName(null);
               },
-              child: const Text('RIMUOVI'),
+              child: Text(l10n.remove),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('ANNULLA'),
+              child: Text(l10n.cancel),
             ),
             FilledButton(
               onPressed: () {
                 final v = controller.text.trim();
                 if (v.isEmpty) {
-                  setLocalState(
-                      () => errorText = 'Il nome non può essere vuoto');
+                  setLocalState(() => errorText = l10n.nameCannotBeEmpty);
                   return;
                 }
                 Navigator.of(context).pop();
                 _saveCustomCategoryName(v);
               },
-              child: const Text('SALVA'),
+              child: Text(l10n.save),
             ),
           ],
         ),

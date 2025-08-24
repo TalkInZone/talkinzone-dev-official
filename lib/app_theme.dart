@@ -1,4 +1,5 @@
 // lib/app_theme.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,15 +9,22 @@ class AppThemeController extends ChangeNotifier {
   AppThemeController._();
   static final AppThemeController instance = AppThemeController._();
 
-  static const _prefsKey = 'app_theme';
+  static const _prefsKeyTheme = 'app_theme';
+  static const _prefsKeyLanguageCode = 'language_code';
+  static const _prefsKeyCountryCode = 'country_code';
+  
   AppTheme _theme = AppTheme.light;
+  Locale _locale = const Locale('en'); // Default to English
 
   AppTheme get theme => _theme;
+  Locale get locale => _locale;
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
-    switch (raw) {
+    
+    // Load theme
+    final rawTheme = prefs.getString(_prefsKeyTheme);
+    switch (rawTheme) {
       case 'dark':
         _theme = AppTheme.dark;
         break;
@@ -27,6 +35,17 @@ class AppThemeController extends ChangeNotifier {
       default:
         _theme = AppTheme.light;
     }
+    
+    // Load language
+    final languageCode = prefs.getString(_prefsKeyLanguageCode);
+    final countryCode = prefs.getString(_prefsKeyCountryCode);
+    
+    if (languageCode != null) {
+      _locale = Locale(languageCode, countryCode);
+    } else {
+      _locale = const Locale('en'); // Default to English
+    }
+    
     notifyListeners();
   }
 
@@ -34,7 +53,19 @@ class AppThemeController extends ChangeNotifier {
     _theme = t;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKey, t.name);
+    await prefs.setString(_prefsKeyTheme, t.name);
+  }
+
+  Future<void> setLocale(Locale newLocale) async {
+    _locale = newLocale;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKeyLanguageCode, newLocale.languageCode);
+    if (newLocale.countryCode != null) {
+      await prefs.setString(_prefsKeyCountryCode, newLocale.countryCode!);
+    } else {
+      await prefs.remove(_prefsKeyCountryCode);
+    }
   }
 }
 

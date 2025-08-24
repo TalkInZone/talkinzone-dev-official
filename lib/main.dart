@@ -1,14 +1,3 @@
-// main.dart — completo (Material 3, temi Light/Dark/Grey, blocco utenti, reazioni ottimizzate)
-//
-// NOTE di manutenzione su questa revisione:
-// - Aggiunto controller tema (Light / Dark / Grey) via AppThemeController (app_theme.dart)
-// - Pannello “Il tuo account” ora usa i colori del tema (niente bianco fisso)
-// - Aggiunte graffe per tutti gli `if (...) return;` (lint: curly_braces_in_flow_control_structures)
-// - Evitato l'uso del BuildContext dopo gli await senza `mounted` (lint: use_build_context_synchronously)
-// - Ridotti i cast superflui con DocumentSnapshot tipizzati (lint: unnecessary_cast)
-// 🌍 I18N: integrazione localizzazione EN/IT (default EN) con AppLocaleController + delegates
-// 🔒 Age Gate: fix anti-flicker — mostra loader finché lo snapshot è da cache o con pending writes
-
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -32,13 +21,8 @@ import 'category_utils.dart';
 import 'home_screen_ui.dart';
 import 'voice_message.dart';
 import 'services/user_profile.dart';
-import 'app_theme.dart'; // <<<< Tema (Light/Dark/Grey)
-
-// 🌍 I18N: import pacchetti di localizzazione
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'app_theme.dart';
 import 'gen_l10n/app_localizations.dart';
-// 🌍 I18N: controller lingua runtime
-import 'i18n/app_locale.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -113,7 +97,6 @@ class AuthService {
 
         debugPrint("🎉 Accesso riuscito! UID: ${userCredential.user!.uid}");
 
-        // Upsert + schema reconciliation del profilo
         await UserProfile.upsertOnAuth(userCredential.user!,
             provider: 'google', pruneUnknownKeys: true);
 
@@ -128,36 +111,6 @@ class AuthService {
     } catch (e, stack) {
       debugPrint("💥 ERRORE GLOBALE: $e\n$stack");
       return null;
-    }
-  }
-
-  // ignore: unused_element
-  Future<void> _saveUserData(User user) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_id', user.uid);
-
-      await UserProfile.upsertOnAuth(user,
-          provider: 'google', pruneUnknownKeys: true);
-
-      debugPrint(
-          "✅ Dati utente (upsert) salvati/aggiornati per UID: ${user.uid}");
-
-      final userDoc =
-          FirebaseFirestore.instance.collection('utenti').doc(user.uid);
-      final docSnapshot = await userDoc.get();
-      if (docSnapshot.exists) {
-        debugPrint("🎉 Verificato: documento utente esiste in Firestore");
-      } else {
-        debugPrint("❌ Documento non trovato dopo il salvataggio");
-      }
-    } catch (e, stack) {
-      debugPrint('💥 ERRORE CRITICO salvataggio dati utente: $e');
-      debugPrint('🔥 Stack trace: $stack');
-      if (e is FirebaseException) {
-        debugPrint("🔥 FIREBASE ERROR CODE: ${e.code}");
-        debugPrint("🔥 FIREBASE MESSAGE: ${e.message}");
-      }
     }
   }
 
@@ -270,7 +223,6 @@ Future<void> backgroundNotificationHandler() async {
         debugPrint('🗑️ [BACKGROUND] Cancellazione messaggio scaduto: ${doc.id}'
             ' (Inviato: ${timestamp.toDate()}, Scaduto: $expirationTime)');
 
-        // ✅ Skip cancellazione Storj per messaggi testuali
         if (type != 'text' && objectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(objectKey);
@@ -318,7 +270,6 @@ Future<void> backgroundNotificationHandler() async {
   final lastRunTime = prefs.getInt('lastRunTime') ?? 0;
   final lastRunDateTime = DateTime.fromMillisecondsSinceEpoch(lastRunTime);
 
-  // 🆕 Carica la lista bloccati del current user (per filtrare le notifiche)
   Set<String> blocked = {};
   if (currentUserId.isNotEmpty) {
     try {
@@ -352,12 +303,10 @@ Future<void> backgroundNotificationHandler() async {
         continue;
       }
 
-      // 🆕 Filtra: non notificare se HO BLOCCATO il mittente
       if (blocked.contains(senderId)) {
         continue;
       }
 
-      // 🆕 Filtra: non notificare se SONO in invisibleTo di quel messaggio
       final List<dynamic> invDyn =
           (data['invisibleTo'] as List<dynamic>?) ?? const [];
       final Set<String> invisibleTo = invDyn.map((e) => e.toString()).toSet();
@@ -377,7 +326,6 @@ Future<void> backgroundNotificationHandler() async {
         );
 
         if (distance <= selectedRadius) {
-          // 🆕 Categoria personalizzata: mostra il nome reale nelle notifiche
           String category = data['category'] as String? ?? 'free';
           if (category.toLowerCase() == 'custom' ||
               category.toLowerCase() == 'special' ||
@@ -409,6 +357,7 @@ class LoginScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AuthService authService = AuthService();
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       body: Center(
@@ -417,22 +366,20 @@ class LoginScreen extends StatelessWidget {
           children: [
             Image.asset('assets/app_logo.png', width: 120, height: 120),
             const SizedBox(height: 40),
-            const Text(
-              'Benvenuto in TalkInZone',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            Text(
+              l10n.welcomeTitle,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 40),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
               child: Text(
-                'Per iniziare, accedi con il tuo account Google',
+                l10n.welcomeSubtitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 16),
               ),
             ),
             const SizedBox(height: 40),
-
-            // Pulsante Google (Material 3)
             FilledButton.icon(
               onPressed: () async {
                 debugPrint("👉 Bottone di accesso premuto (Google)");
@@ -443,7 +390,7 @@ class LoginScreen extends StatelessWidget {
                     return;
                   }
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Accesso fallito. Riprova.')),
+                    SnackBar(content: Text(l10n.loginFailed)),
                   );
                 } else {
                   debugPrint("✅ Accesso Google riuscito, navigazione...");
@@ -451,7 +398,7 @@ class LoginScreen extends StatelessWidget {
               },
               icon:
                   Image.asset('assets/google_logo.png', width: 20, height: 20),
-              label: const Text('Accedi con Google'),
+              label: Text(l10n.signInWithGoogle),
               style: FilledButton.styleFrom(minimumSize: const Size(280, 48)),
             ),
           ],
@@ -472,12 +419,9 @@ class AuthWrapper extends StatelessWidget {
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          // App "vuota" ma tematizzata anche in attesa
           return AnimatedBuilder(
-            // 🌍 I18N: ascolta anche i cambi lingua
             animation: Listenable.merge([
               AppThemeController.instance,
-              AppLocaleController.instance,
             ]),
             builder: (context, _) {
               final t = AppThemeController.instance.theme;
@@ -486,21 +430,12 @@ class AuthWrapper extends StatelessWidget {
                 theme: AppThemes.light,
                 darkTheme:
                     t == AppTheme.grey ? AppThemes.greyDark : AppThemes.dark,
-                // per Grey in login usiamo system per coerenza
                 themeMode: t == AppTheme.light
                     ? ThemeMode.light
                     : (t == AppTheme.dark ? ThemeMode.dark : ThemeMode.system),
-
-                // 🌍 I18N: locale dinamica (default EN)
-                locale: AppLocaleController.instance.locale,
-                supportedLocales: const [Locale('en'), Locale('it')],
-                localizationsDelegates: const [
-                  AppLocalizations.delegate,
-                  GlobalMaterialLocalizations.delegate,
-                  GlobalWidgetsLocalizations.delegate,
-                  GlobalCupertinoLocalizations.delegate,
-                ],
-
+                locale: AppThemeController.instance.locale,
+                supportedLocales: AppLocalizations.supportedLocales,
+                localizationsDelegates: AppLocalizations.localizationsDelegates,
                 home: const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
                 ),
@@ -514,12 +449,9 @@ class AuthWrapper extends StatelessWidget {
           return const VoiceChatApp();
         }
 
-        // Non loggato: MaterialApp tematizzata con LoginScreen
         return AnimatedBuilder(
-          // 🌍 I18N: ascolta anche i cambi lingua
           animation: Listenable.merge([
             AppThemeController.instance,
-            AppLocaleController.instance,
           ]),
           builder: (context, _) {
             final t = AppThemeController.instance.theme;
@@ -536,17 +468,9 @@ class AuthWrapper extends StatelessWidget {
               theme: theme,
               darkTheme: darkTheme,
               themeMode: mode,
-
-              // 🌍 I18N
-              locale: AppLocaleController.instance.locale,
-              supportedLocales: const [Locale('en'), Locale('it')],
-              localizationsDelegates: const [
-                AppLocalizations.delegate,
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-
+              locale: AppThemeController.instance.locale,
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
               home: const LoginScreen(),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -613,26 +537,19 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   bool _isDisposed = false;
 
-  // NEW: testo
   final TextEditingController _textController = TextEditingController();
   bool _isSendingText = false;
 
-  // NEW: debounce locale per “testo visto”
   final Set<String> _textSeenOnce = {};
 
-  // 🔧 NEW: evita sync multiple dello schema profilo
   bool _didSchemaSync = false;
 
-  // 🆕 Categoria personalizzata — stato utente (nome scelto in Settings)
-  String? _customCategoryName; // SharedPreferences: 'custom_category_name'
-  MessageCategory?
-      _customEnum; // valore enum per la categoria personalizzata (se presente)
-  final Map<String, String> _msgCustomNames = {}; // idMsg -> nome custom su doc
+  String? _customCategoryName;
+  MessageCategory? _customEnum;
+  final Map<String, String> _msgCustomNames = {};
 
-  // 🆕🆕 BLOCCO: stato runtime degli utenti bloccati (sincronizzato live)
-  Set<String> _blockedIds = {}; // UID bloccati
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
-      _userDocSub; // listener sul mio doc utente (tipizzato)
+  Set<String> _blockedIds = {};
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSub;
 
   @override
   void initState() {
@@ -662,7 +579,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     _longPressTimer?.cancel();
     _gpsUpdateTimer?.cancel();
 
-    _userDocSub?.cancel(); // 🆕 stop listener id_bloccati
+    _userDocSub?.cancel();
 
     _textController.dispose();
 
@@ -695,14 +612,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         prefs.setBool('first_launch', false);
       }
 
-      // 🆕 Categoria personalizzata: carica nome scelto
       final rawName = (prefs.getString('custom_category_name') ?? '').trim();
       _customCategoryName = rawName.isEmpty ? null : rawName;
 
       _customEnum = _findCustomEnum();
     });
 
-    // 🔧 NEW: sincronizza lo schema del profilo
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null && uid.isNotEmpty && !_didSchemaSync) {
@@ -716,7 +631,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
       await _loadUserData();
-      _attachUserDocListener(); // 🆕 inizia a seguire la mia lista bloccati in tempo reale
+      _attachUserDocListener();
     }
   }
 
@@ -760,9 +675,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       return true;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Imposta il nome della categoria personalizzata nelle Impostazioni.'),
+      SnackBar(
+        content: Text(AppLocalizations.of(context).customCategoryWarning),
       ),
     );
     return false;
@@ -770,7 +684,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
   Future<void> _loadUserData() async {
     try {
-      // ✅ Tipizzo lo snapshot per evitare cast non necessari
       final DocumentSnapshot<Map<String, dynamic>> userDoc =
           await FirebaseFirestore.instance
               .collection('utenti')
@@ -781,7 +694,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         final data = userDoc.data();
         setState(() {
           _currentUserData = data;
-          // 🆕 leggi id_bloccati
           final List<dynamic> b =
               (data?['id_bloccati'] as List<dynamic>?) ?? const [];
           _blockedIds = b.map((e) => e.toString()).toSet();
@@ -795,7 +707,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // 🆕 Listener realtime del mio documento utente per tenere aggiornata la lista bloccati
   void _attachUserDocListener() {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? _currentUserId;
     if (uid == null || uid.isEmpty) {
@@ -878,9 +789,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   void _initializeFirestoreListener() {
-    // 🔧 FIX VISIBILITÀ:
-    // RIMOSSO il WHERE sul timestamp (i documenti con serverTimestamp() null non passavano il filtro).
-    // Manteniamo solo l'ORDER BY + LIMIT; l'expiry (5 min) viene gestito in locale.
     _messagesSubscription = _firestoreMessages
         .orderBy('timestamp', descending: true)
         .limit(200)
@@ -924,10 +832,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       if (email.isNotEmpty) {
         return email.split('@').first;
       }
-
-      return 'Anonimo';
+      if (!mounted) return 'Anonymous';
+      return AppLocalizations.of(context).anonymous;
     } catch (_) {
-      return 'Anonimo';
+      if (!mounted) return 'Anonymous';
+      return AppLocalizations.of(context).anonymous;
     }
   }
 
@@ -946,10 +855,13 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           .collection('utenti')
           .doc(senderId)
           .get();
+        
+        if (!mounted) return;
+
       String? nome = (userSnap.data()?['nome'] as String?)?.trim();
 
       if (nome == null || nome.isEmpty) {
-        nome = 'Anonimo';
+        nome = AppLocalizations.of(context).anonymous;
       }
 
       await doc.reference.update({'name': nome});
@@ -960,7 +872,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   void _processFirestoreSnapshot(QuerySnapshot snapshotRaw) {
-    // Tipizzo correttamente i documenti per evitare cast superflui
     final snapshot = snapshotRaw as QuerySnapshot<Map<String, dynamic>>;
 
     final now = DateTime.now();
@@ -975,7 +886,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         final newMessage = VoiceMessage.fromFirestore(doc);
         final isExpired = now.difference(newMessage.timestamp).inMinutes >= 10;
 
-        // 🆕 salva il nome custom della categoria per filtri locali
         try {
           final data = doc.data();
           final cn = (data['customCategoryName'] as String?)?.trim();
@@ -997,7 +907,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           } else {
             newMessages.add(newMessage);
             if (_notificationSoundEnabled &&
-                !_isHiddenByBlock(newMessage) && // 🆕 non beepare se nascosto
+                !_isHiddenByBlock(newMessage) &&
                 _isMessageInRange(newMessage) &&
                 _activeFilters.contains(newMessage.category) &&
                 _matchesMyCustomName(newMessage) &&
@@ -1033,15 +943,14 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // 🆕 Utility: stabilisce se un messaggio va nascosto per via dei blocchi
   bool _isHiddenByBlock(VoiceMessage m) {
     final myUid =
         FirebaseAuth.instance.currentUser?.uid ?? _currentUserId ?? '';
     if (_blockedIds.contains(m.senderId)) {
-      return true; // io ho bloccato lui -> non lo vedo
+      return true;
     }
     if (myUid.isNotEmpty && m.invisibleTo.contains(myUid)) {
-      return true; // lui mi ha “invisibilizzato”
+      return true;
     }
     return false;
   }
@@ -1144,7 +1053,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         debugPrint(
             '🗑️ [${DateTime.now()}] Cancellazione messaggio scaduto: ${message.id}');
 
-        // ✅ Cancella su Storj SOLO se è un vocale
         if (message.isVoice && message.storjObjectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(message.storjObjectKey);
@@ -1239,7 +1147,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
 
     try {
-      // 🆕 Se selezionata "custom" ma non impostato il nome, blocca invio
       if (!_requireCustomNameOrWarn()) {
         _recordingTimer?.cancel();
         await _recorder!.stopRecorder();
@@ -1292,7 +1199,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             'viewedBy': <String>[],
             'name': senderName,
             'text': null,
-            // 🆕 Chi ho bloccato non deve vedere i miei NUOVI messaggi
             'invisibleTo': _blockedIds.toList(),
           };
           await FirebaseFirestore.instance.collection('messages').add(payload);
@@ -1330,7 +1236,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       return;
     }
 
-    // 🆕 Blocca invio se custom senza nome impostato
     if (!_requireCustomNameOrWarn()) {
       return;
     }
@@ -1366,7 +1271,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         'viewedBy': <String>[],
         'name': senderName,
         'text': _textController.text.trim(),
-        // 🆕 Chi ho bloccato non deve vedere i miei NUOVI messaggi
         'invisibleTo': _blockedIds.toList(),
       };
 
@@ -1390,7 +1294,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         return false;
       }
       if (_isHiddenByBlock(m)) {
-        return false; // 🆕 filtro blocco
+        return false;
       }
       if (!_isMessageInRange(m)) {
         return false;
@@ -1523,7 +1427,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             });
           }
         } catch (e) {
-          debugPrint('❌ Errore aggiornamento visualizzazioni: $e');
+          debugPrint(" ❌ Errore aggiornamento visualizzazioni: $e");
         }
       }
     } catch (e) {
@@ -1586,7 +1490,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // NEW: marca "letto" per TESTO quando la bolla è visibile
   Future<void> _markTextMessageViewed(VoiceMessage message) async {
     if (!message.isText) {
       return;
@@ -1617,8 +1520,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         final docRef =
             FirebaseFirestore.instance.collection('messages').doc(message.id);
         final snap = await txn.get(docRef);
-        // ignore: unnecessary_cast
-        final data = snap.data() as Map<String, dynamic>? ?? {};
+        final data = snap.data() ?? {};
 
         final List<dynamic> viewedByDyn =
             (data['viewedBy'] as List<dynamic>?) ?? const [];
@@ -1646,7 +1548,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     }
   }
 
-  // ✅ Reazioni: toggle su Firestore
   Future<void> _toggleReaction(VoiceMessage message, String emoji) async {
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
     final String? myUid = (currentUid != null && currentUid.isNotEmpty)
@@ -1666,8 +1567,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           return;
         }
 
-        // ignore: unnecessary_cast
-        final data = (snap.data() as Map<String, dynamic>? ?? {});
+        final data = snap.data() ?? {};
         final Map<String, dynamic> rxRaw =
             (data['reactions'] as Map<String, dynamic>?) ?? {};
         final List<dynamic> usersDyn =
@@ -1684,20 +1584,18 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           });
         }
       });
-      // 🔄 UI si aggiorna via listener
     } catch (e) {
       debugPrint('❌ Errore toggle reazione: $e');
     }
   }
 
-  // 🆕 Blocca utente (scrive nel mio doc `id_bloccati`)
   Future<void> _blockUserById(String targetUid) async {
     final myUid =
         FirebaseAuth.instance.currentUser?.uid ?? _currentUserId ?? '';
     if (targetUid.isEmpty || myUid.isEmpty || targetUid == myUid) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Operazione non valida.')),
+          SnackBar(content: Text(AppLocalizations.of(context).invalidOperation)),
         );
       }
       return;
@@ -1711,40 +1609,38 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Utente bloccato.')),
+          SnackBar(content: Text(AppLocalizations.of(context).userBlocked)),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Errore durante il blocco.')),
+          SnackBar(content: Text(AppLocalizations.of(context).blockError)),
         );
       }
     }
   }
 
-  // 🆕 Conferma blocco dal long-press sulla nuvoletta
   Future<void> _confirmAndBlock(VoiceMessage m) async {
     final targetUid = m.senderId;
     if (targetUid.isEmpty) {
       return;
     }
 
+    final l10n = AppLocalizations.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         icon: const Icon(Icons.block, color: Colors.red),
-        title: const Text('Blocca utente'),
-        content: const Text("Vuoi davvero bloccare questo utente?\n\n"
-            "• Non vedrai più nessun suo messaggio\n"
-            "• Lui non vedrà più nessun tuo messaggio"),
+        title: Text(l10n.blockUser),
+        content: Text(l10n.blockUserConfirmation),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('ANNULLA')),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('BLOCCA'),
+            child: Text(l10n.block),
           ),
         ],
       ),
@@ -1793,10 +1689,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             isWaitingForRelease: _isWaitingForRelease,
             playingMessageId: _playingMessageId,
             radiusOptions: _radiusOptions,
-
-            // Stato invio testo
             isSendingText: _isSendingText,
-
             onPlayMessage: _playMessage,
             onToggleRadiusSelector: () => setState(() {
               _showRadiusSelector = !_showRadiusSelector;
@@ -1823,9 +1716,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               if (_isCustomCategoryEnum(category) &&
                   ((_customCategoryName ?? '').trim().isEmpty)) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'Seleziona un nome per la categoria personalizzata nelle Impostazioni.'),
+                  SnackBar(
+                    content: Text(AppLocalizations.of(context).customCategoryWarning),
                   ),
                 );
               }
@@ -1865,29 +1757,20 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
               final prefs = await SharedPreferences.getInstance();
               await prefs.setDouble('selected_radius', r);
             },
-
-            // Input testo
             textController: _textController,
             textError: (_textController.text.characters.length > 250)
-                ? 'Max 250 caratteri'
+                ? AppLocalizations.of(context).maxCharsError(250)
                 : '',
             onSendText: () {
               if (canSend) {
                 _sendTextMessage();
               }
             },
-
-            // Visibilità testo (per conteggio "visto")
             onTextVisible: (m) => _markTextMessageViewed(m),
-
-            // Reazioni
             onToggleReaction: (m, emoji) => _toggleReaction(m, emoji),
-
-            // 🆕 Blocca utente: long-press sulla nuvoletta
             onRequestBlockUser: _confirmAndBlock,
           ),
 
-          // Pannello profilo (adattivo ai temi)
           if (!_showWelcomeMessage && _currentUserData != null && _showUserInfo)
             Positioned(
               top: 60,
@@ -1898,8 +1781,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                   color: cs.surface,
                   boxShadow: [
                     BoxShadow(
-                      // ignore: deprecated_member_use
-                      color: Colors.black.withOpacity(0.15),
+               color: Colors.black.withValues(alpha: 0.15),        
                       blurRadius: 10,
                       spreadRadius: 2,
                     )
@@ -1914,12 +1796,11 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Il tuo account',
+                          AppLocalizations.of(context).yourAccount,
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -1934,8 +1815,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       ],
                     ),
                     const SizedBox(height: 10),
-
-                    // Avatar / iniziali
                     (() {
                       final fotoUrl =
                           (_currentUserData!['foto_url'] as String?)?.trim();
@@ -1947,7 +1826,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                           radius: 30,
                         );
                       }
-                      // fallback: iniziali
                       String initials = 'A';
                       if (nome != null && nome.isNotEmpty) {
                         final parts = nome
@@ -1971,18 +1849,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       );
                     })(),
                     const SizedBox(height: 10),
-
-                    // Info
                     Text(
-                      'ID utente:',
+                      AppLocalizations.of(context).userId,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        // ignore: deprecated_member_use
-                        color: cs.onSurface.withOpacity(0.7),
+                      color: cs.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     SelectableText(
-                      _currentUserId ?? 'Nessun ID',
+                      _currentUserId ?? AppLocalizations.of(context).noId,
                       style: TextStyle(
                         fontSize: 14,
                         fontFamily: 'monospace',
@@ -1991,22 +1866,20 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Nome: ${_currentUserData!['nome'] ?? 'Nessun nome'}',
+                      '${AppLocalizations.of(context).name}: ${_currentUserData!['nome'] ?? AppLocalizations.of(context).noName}',
                       style: TextStyle(fontSize: 16, color: cs.onSurface),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      'Email: ${_currentUserData!['email'] ?? 'Nessuna email'}',
+                      '${AppLocalizations.of(context).email}: ${_currentUserData!['email'] ?? AppLocalizations.of(context).noEmail}',
                       style: TextStyle(fontSize: 14, color: cs.onSurface),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      'Provider: ${_currentUserData!['provider'] ?? 'N/D'}',
+                      '${AppLocalizations.of(context).provider}: ${_currentUserData!['provider'] ?? 'N/D'}',
                       style: TextStyle(fontSize: 14, color: cs.onSurface),
                     ),
                     const SizedBox(height: 12),
-
-                    // Esci
                     FilledButton(
                       style: FilledButton.styleFrom(
                         backgroundColor: cs.error,
@@ -2024,7 +1897,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                               builder: (context) => const AuthWrapper()),
                         );
                       },
-                      child: const Text('Esci'),
+                      child: Text(AppLocalizations.of(context).logout),
                     ),
                   ],
                 ),
@@ -2036,43 +1909,27 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 }
 
-// ============================================================================
-// 🔒 Age Gate (Data di nascita obbligatoria, minimo 16 anni) + FIX ANTI-FLICKER
-// ============================================================================
 class AgeGateConfig {
   static const int minAgeYears = 16;
 }
 
-class AgeGateErrors {
-  const AgeGateErrors();
-
-  final String missingDate = 'Seleziona una data di nascita.';
-  String tooYoung(int years) =>
-      'Per usare l’app devi avere almeno $years anni.';
-  final String mustAccept =
-      'Devi confermare che i dati forniti sono veritieri.';
-  final String generic = 'Si è verificato un errore. Riprova.';
-}
-
 class AgeGateStrings {
-  static const String title = 'Completa il profilo';
-  static String subtitle() =>
-      'Per continuare ad usare TalkInZone devi indicare la tua data di nascita '
-      '(età minima: ${AgeGateConfig.minAgeYears} anni).';
-  static const String dateLabel = 'Data di nascita';
-  static const String datePlaceholder = 'Seleziona una data';
-  static const String datePickerHelp = 'Seleziona la tua data di nascita';
-  static const String declaration =
-      'Dichiaro che i dati forniti sono veritieri.';
-  static const String falseWarning =
-      'Attenzione: dichiarazioni false possono comportare la sospensione dell’account.';
-  static const String cta = 'Conferma e continua';
-  static const String logout = 'Esci';
+  static String title(BuildContext context) => AppLocalizations.of(context).ageGateTitle;
+  static String subtitle(BuildContext context) => AppLocalizations.of(context).ageGateSubtitle(AgeGateConfig.minAgeYears);
+  static String dateLabel(BuildContext context) => AppLocalizations.of(context).birthDate;
+  static String datePlaceholder(BuildContext context) => AppLocalizations.of(context).selectDate;
+  static String datePickerHelp(BuildContext context) => AppLocalizations.of(context).selectBirthDate;
+  static String declaration(BuildContext context) => AppLocalizations.of(context).truthDeclaration;
+  static String falseWarning(BuildContext context) => AppLocalizations.of(context).falseWarning;
+  static String cta(BuildContext context) => AppLocalizations.of(context).confirmAndContinue;
+  static String logout(BuildContext context) => AppLocalizations.of(context).logout;
 
-  static AgeGateErrors get errors => const AgeGateErrors();
+  static String missingDate(BuildContext context) => AppLocalizations.of(context).missingDate;
+  static String tooYoung(BuildContext context, int years) => AppLocalizations.of(context).tooYoung(years);
+  static String mustAccept(BuildContext context) => AppLocalizations.of(context).mustAccept;
+  static String generic(BuildContext context) => AppLocalizations.of(context).genericError;
 }
 
-// 🔧 FIX ANTI-FLICKER: mostra AgeGate solo quando la mancanza della data è confermata dal server
 class AgeGateWrapper extends StatelessWidget {
   final Widget child;
   const AgeGateWrapper({super.key, required this.child});
@@ -2100,19 +1957,16 @@ class AgeGateWrapper extends StatelessWidget {
         final bool pending = doc.metadata.hasPendingWrites;
         final bool fromCache = doc.metadata.isFromCache;
 
-        // ⏳ Se lo snapshot è da cache o ci sono write pendenti → evita cambi schermo
         if (pending || fromCache) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        // ✅ Data presente (confermata dal server) → entra
         if (ts != null) {
           return child;
         }
 
-        // ❌ Data assente (confermata dal server) → mostra AgeGate
         return const DateOfBirthScreen();
       },
     );
@@ -2147,7 +2001,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
       initialDate: initial.isBefore(lastDate) ? initial : lastDate,
       firstDate: firstDate,
       lastDate: lastDate,
-      helpText: AgeGateStrings.datePickerHelp,
+      helpText: AgeGateStrings.datePickerHelp(context),
     );
     if (picked != null) {
       setState(() => _dob = picked);
@@ -2158,16 +2012,16 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
     setState(() => _error = null);
 
     if (_dob == null) {
-      setState(() => _error = AgeGateStrings.errors.missingDate);
+      setState(() => _error = AgeGateStrings.missingDate(context));
       return;
     }
     if (_dob!.isAfter(_cutoff)) {
       setState(() =>
-          _error = AgeGateStrings.errors.tooYoung(AgeGateConfig.minAgeYears));
+          _error = AgeGateStrings.tooYoung(context, AgeGateConfig.minAgeYears));
       return;
     }
     if (!_accepted) {
-      setState(() => _error = AgeGateStrings.errors.mustAccept);
+      setState(() => _error = AgeGateStrings.mustAccept(context));
       return;
     }
 
@@ -2183,7 +2037,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
             SetOptions(merge: true),
           );
     } catch (e) {
-      setState(() => _error = AgeGateStrings.errors.generic);
+      setState(() => _error = AgeGateStrings.generic(context));
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -2191,9 +2045,9 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
     }
   }
 
-  String _formatDob(DateTime? d) {
+  String _formatDob(DateTime? d, BuildContext context) {
     if (d == null) {
-      return AgeGateStrings.datePlaceholder;
+      return AgeGateStrings.datePlaceholder(context);
     }
     final y = d.year.toString().padLeft(4, '0');
     final m = d.month.toString().padLeft(2, '0');
@@ -2217,25 +2071,25 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                 children: [
                   Icon(Icons.cake_outlined, size: 64, color: cs.primary),
                   const SizedBox(height: 12),
-                  const Text(
-                    AgeGateStrings.title,
+                  Text(
+                    AgeGateStrings.title(context),
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    AgeGateStrings.subtitle(),
+                    AgeGateStrings.subtitle(context),
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 14),
                   ),
                   const SizedBox(height: 24),
-                  const Text(AgeGateStrings.dateLabel),
+                  Text(AgeGateStrings.dateLabel(context)),
                   const SizedBox(height: 8),
                   TextFormField(
                     readOnly: true,
                     onTap: _pickDate,
                     decoration: InputDecoration(
-                      hintText: _formatDob(_dob),
+                      hintText: _formatDob(_dob, context),
                       suffixIcon: const Icon(Icons.calendar_today_outlined),
                       border: const OutlineInputBorder(),
                     ),
@@ -2249,12 +2103,12 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                         onChanged: (v) =>
                             setState(() => _accepted = v ?? false),
                       ),
-                      const Expanded(child: Text(AgeGateStrings.declaration)),
+                      Expanded(child: Text(AgeGateStrings.declaration(context))),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    AgeGateStrings.falseWarning,
+                    AgeGateStrings.falseWarning(context),
                     style: TextStyle(color: Colors.red.shade700, fontSize: 12),
                   ),
                   if (_error != null) ...[
@@ -2273,7 +2127,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text(AgeGateStrings.cta),
+                        : Text(AgeGateStrings.cta(context)),
                   ),
                   const SizedBox(height: 8),
                   TextButton(
@@ -2288,7 +2142,7 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                         (_) => false,
                       );
                     },
-                    child: const Text(AgeGateStrings.logout),
+                    child: Text(AgeGateStrings.logout(context)),
                   ),
                 ],
               ),
@@ -2306,10 +2160,8 @@ class VoiceChatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      // 🌍 I18N: ascolta anche i cambi lingua
       animation: Listenable.merge([
         AppThemeController.instance,
-        AppLocaleController.instance,
       ]),
       builder: (context, _) {
         final choice = AppThemeController.instance.theme;
@@ -2321,18 +2173,9 @@ class VoiceChatApp extends StatelessWidget {
               theme: AppThemes.light,
               darkTheme: AppThemes.dark,
               themeMode: ThemeMode.light,
-
-              // 🌍 I18N
-              locale: AppLocaleController.instance.locale,
-              supportedLocales: const [Locale('en'), Locale('it')],
-              localizationsDelegates: const [
-                AppLocalizations.delegate,
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-
-              // 🔒 MOSTRA la Home SOLO se data_di_nascita è valorizzata.
+              locale: AppThemeController.instance.locale,
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -2343,39 +2186,22 @@ class VoiceChatApp extends StatelessWidget {
               theme: AppThemes.light,
               darkTheme: AppThemes.dark,
               themeMode: ThemeMode.dark,
-
-              // 🌍 I18N
-              locale: AppLocaleController.instance.locale,
-              supportedLocales: const [Locale('en'), Locale('it')],
-              localizationsDelegates: const [
-                AppLocalizations.delegate,
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-
+              locale: AppThemeController.instance.locale,
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
 
           case AppTheme.grey:
-            // Grey usa palette neutra; si adatta al sistema (grey chiaro/scuro)
             return MaterialApp(
               title: 'TalkInZone',
               theme: AppThemes.greyLight,
               darkTheme: AppThemes.greyDark,
               themeMode: ThemeMode.system,
-
-              // 🌍 I18N
-              locale: AppLocaleController.instance.locale,
-              supportedLocales: const [Locale('en'), Locale('it')],
-              localizationsDelegates: const [
-                AppLocalizations.delegate,
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-
+              locale: AppThemeController.instance.locale,
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
               home: const AgeGateWrapper(child: VoiceChatHome()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
@@ -2463,7 +2289,6 @@ Future<void> _runStartupCleanup() async {
 
         debugPrint('🗑️ [STARTUP] Cancellazione messaggio scaduto: ${doc.id}');
 
-        // ✅ Skip cancellazione Storj per messaggi testuali
         if (type != 'text' && objectKey.isNotEmpty) {
           try {
             await storjService.deleteFile(objectKey);
@@ -2488,11 +2313,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // Carica la scelta tema salvata (Light / Dark / Grey)
   await AppThemeController.instance.load();
-
-  // 🌍 I18N: carica lingua salvata (default EN)
-  await AppLocaleController.instance.load();
 
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

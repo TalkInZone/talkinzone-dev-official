@@ -20,8 +20,6 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'gen_l10n/app_localizations.dart';
-import 'i18n_compat.dart'; // <-- AGGIUNGI QUESTA RIGA
-
 import 'category_utils.dart'
     show
         MessageCategory,
@@ -319,7 +317,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     final t = AppLocalizations.of(context);
     final now = DateTime.now();
     final diff = now.difference(ts);
-    if (diff.inMinutes < 1) return t.relNow();
+    if (diff.inMinutes < 1) return t.relNow;
     if (diff.inMinutes < 60) return t.relMinutesAgo(diff.inMinutes);
     if (diff.inHours < 24) return t.relHoursAgo(diff.inHours);
     // Keep a short dd/MM HH:mm for both locales (simple & compact)
@@ -329,19 +327,19 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
   String _formatDistanceMetersLoc(BuildContext context, double meters) {
     final t = AppLocalizations.of(context);
-    if (meters < 60) return t.distVeryClose();
-    if (meters < 300) return t.distClose();
-    if (meters < 1000) return '${meters.toStringAsFixed(0)} ${t.unitM()}';
-    return '${(meters / 1000).toStringAsFixed(1)} ${t.unitKm()}';
+    if (meters < 60) return t.distVeryClose;
+    if (meters < 300) return t.distClose;
+    if (meters < 1000) return '${meters.toStringAsFixed(0)} ${t.unitM}';
+    return '${(meters / 1000).toStringAsFixed(1)} ${t.unitKm}';
   }
 
   String _formatDistanceBucketLoc(BuildContext context, double meters) {
     final t = AppLocalizations.of(context);
-    if (meters <= 500) return t.distVeryClose();
-    if (meters <= 1000) return t.distClose();
-    if (meters <= 2000) return t.distInArea();
-    if (meters <= 3000) return t.distFar();
-    return t.distVeryFar();
+    if (meters <= 500) return t.distVeryClose;
+    if (meters <= 1000) return t.distClose;
+    if (meters <= 2000) return t.distInArea;
+    if (meters <= 3000) return t.distFar;
+    return t.distVeryFar;
   }
 
   double _distanceTo(VoiceMessage m) {
@@ -697,7 +695,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(t.reactionsTitle()),
+        title: Text(t.reactionsTitle),
         content: Wrap(
           spacing: 8,
           children: emojis.map((e) {
@@ -722,7 +720,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(t.close()),
+            child: Text(t.close),
           ),
         ],
       ),
@@ -779,15 +777,16 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       onPlayMessage: widget.onPlayMessage,
                       onToggleReaction: widget.onToggleReaction,
                       onTextVisible: _notifyTextVisibleOnce,
-                      labelBuilder: (m) => displayCategoryLabel(
-                        m.category,
-                        messageCustomName: m.customCategoryName,
-                      ),
+                     labelBuilder: (m) => displayCategoryLabel(
+                     context,  // Aggiungi context come primo parametro
+                     m.category,
+                     messageCustomName: m.customCategoryName,
+                     ),
                       userNameBuilder: (m) {
                         final myId = widget.currentUserId ?? '';
-                        if (m.senderId == myId) return t.you();
+                        if (m.senderId == myId) return t.you;
                         final String n = (m.name).trim();
-                        return n.isEmpty ? t.anonymous() : n;
+                        return n.isEmpty ? t.anonymous : n;
                       },
                       distanceBuilder: (m) {
                         final d = _distanceTo(m);
@@ -886,7 +885,7 @@ class _TopBar extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              tooltip: t.tooltipSettings(),
+              tooltip: t.tooltipSettings,
               onPressed: onSettingsPressed,
               icon: const Icon(Icons.settings),
             ),
@@ -897,9 +896,10 @@ class _TopBar extends StatelessWidget {
                   future: loadCustomCategoryName(),
                   builder: (context, snap) {
                     final label = displayCategoryLabel(
-                      selectedCategory,
-                      prefsCustomName: snap.data,
-                    );
+                    context,  // Aggiungi context come primo parametro
+                    selectedCategory,
+                     prefsCustomName: snap.data,
+                );
                     return Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 10),
@@ -934,17 +934,17 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             IconButton(
-              tooltip: t.tooltipFilters(),
+              tooltip: t.tooltipFilters,
               onPressed: onToggleFilterSelector,
               icon: const Icon(Icons.filter_list),
             ),
             IconButton(
-              tooltip: t.tooltipRadius(),
+              tooltip: t.tooltipRadius,
               onPressed: onToggleRadiusSelector,
               icon: const Icon(Icons.radar),
             ),
             IconButton(
-              tooltip: t.tooltipProfile(),
+              tooltip: t.tooltipProfile,
               onPressed: onProfilePressed,
               icon: const Icon(Icons.person),
             ),
@@ -972,8 +972,8 @@ class _RadiusSelector extends StatelessWidget {
   String _radiusLabel(BuildContext context, double r) {
     final t = AppLocalizations.of(context);
     return (r >= 1000)
-        ? '${(r / 1000).toStringAsFixed(1)} ${t.unitKm()}'
-        : '${r.toStringAsFixed(0)} ${t.unitM()}';
+        ? '${(r / 1000).toStringAsFixed(1)} ${t.unitKm}'
+        : '${r.toStringAsFixed(0)} ${t.unitM}';
   }
 
   @override
@@ -1073,19 +1073,19 @@ class _MessagesList extends StatelessWidget {
 
     if (uid == null || uid.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.mustBeAuthenticatedToBlock())),
+        SnackBar(content: Text(t.mustBeAuthenticatedToBlock)),
       );
       return;
     }
     if (m.senderId == uid) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.cannotBlockYourself())),
+        SnackBar(content: Text(t.cannotBlockYourself)),
       );
       return;
     }
     if (m.senderId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.invalidUserIdToBlock())),
+        SnackBar(content: Text(t.invalidUserIdToBlock)),
       );
       return;
     }
@@ -1093,18 +1093,18 @@ class _MessagesList extends StatelessWidget {
     final ok = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text(t.blockIgnoreTitle()),
+            title: Text(t.blockIgnoreTitle),
             content: Text(t.blockConfirmText(
-              (m.name).trim().isEmpty ? t.anonymous() : m.name.trim(),
+              (m.name).trim().isEmpty ? t.anonymous : m.name.trim(),
             )),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: Text(t.cancel()),
+                child: Text(t.cancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text(t.block()),
+                child: Text(t.block),
               ),
             ],
           ),
@@ -1128,7 +1128,7 @@ class _MessagesList extends StatelessWidget {
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(t.userBlockedSimple())),
+            SnackBar(content: Text(t.userBlockedSimple)),
           );
         }
         return;
@@ -1137,7 +1137,7 @@ class _MessagesList extends StatelessWidget {
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${t.blockError()}: $e')),
+            SnackBar(content: Text('${t.blockError}: $e')),
           );
         }
         return;
@@ -1148,7 +1148,7 @@ class _MessagesList extends StatelessWidget {
       final code = lastErr?.code ?? 'unknown';
       final msg = lastErr?.message ?? lastErr.toString();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${t.blockError()}: [$code] $msg')),
+        SnackBar(content: Text('${t.blockError}: [$code] $msg')),
       );
     }
   }
@@ -1166,17 +1166,17 @@ class _MessagesList extends StatelessWidget {
     final bool confirmed = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text(t.reportUserTitle()),
+            title: Text(t.reportUserTitle),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(t.reportDescribeOptional()),
+                Text(t.reportDescribeOptional),
                 const SizedBox(height: 8),
                 TextField(
                   controller: reasonCtrl,
                   maxLines: 3,
                   decoration: InputDecoration(
-                    hintText: t.reportReasonHint(),
+                    hintText: t.reportReasonHint,
                     border: const OutlineInputBorder(),
                   ),
                 ),
@@ -1185,11 +1185,11 @@ class _MessagesList extends StatelessWidget {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: Text(t.cancel()),
+                child: Text(t.cancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text(t.send()),
+                child: Text(t.send),
               ),
             ],
           ),
@@ -1216,13 +1216,13 @@ class _MessagesList extends StatelessWidget {
       await FirebaseFirestore.instance.collection('reports').add(payload);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(t.reportSentThanks())),
+          SnackBar(content: Text(t.reportSentThanks)),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${t.reportNotSent()}: ${e.toString()}')),
+          SnackBar(content: Text('${t.reportNotSent}: ${e.toString()}')),
         );
       }
     }
@@ -1253,11 +1253,11 @@ class _MessagesList extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.flag_outlined, color: Colors.orange),
                 title: isMine
-                    ? Text(t.cannotReportYourself())
-                    : Text(t.reportUserTitleShort()),
+                    ? Text(t.cannotReportYourself)
+                    : Text(t.reportUserTitleShort),
                 subtitle: isMine
-                    ? Text(t.operationNotAllowed())
-                    : Text(t.reportUserSubtitle()),
+                    ? Text(t.operationNotAllowed)
+                    : Text(t.reportUserSubtitle),
                 enabled: !isMine,
                 onTap: isMine
                     ? null
@@ -1269,11 +1269,11 @@ class _MessagesList extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.block, color: Colors.redAccent),
                 title: isMine
-                    ? Text(t.cannotBlockYourself())
-                    : Text(t.blockIgnoreTitleShort()),
+                    ? Text(t.cannotBlockYourself)
+                    : Text(t.blockIgnoreTitleShort),
                 subtitle: isMine
-                    ? Text(t.operationNotAllowed())
-                    : Text(t.blockIgnoreSubtitle()),
+                    ? Text(t.operationNotAllowed)
+                    : Text(t.blockIgnoreSubtitle),
                 enabled: !isMine,
                 onTap: isMine
                     ? null
@@ -1305,7 +1305,7 @@ class _MessagesList extends StatelessWidget {
     if (messages.isEmpty) {
       return Center(
         child: Text(
-          t.noMessagesInArea(),
+          t.noMessagesInArea,
           style: const TextStyle(color: Colors.grey),
         ),
       );
@@ -1570,7 +1570,7 @@ class _ChatBubbleVisual extends StatelessWidget {
 
     Widget viewsChip() {
       final views = message.views;
-      final label = views <= 0 ? t.newLabel() : views.toString();
+      final label = views <= 0 ? t.newLabel : views.toString();
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2036,7 +2036,7 @@ class _BubbleCore extends StatelessWidget {
                 ),
                 const Spacer(),
                 Tooltip(
-                  message: t.tooltipReactions(),
+                  message: t.tooltipReactions,
                   child: IconButton(
                     visualDensity: VisualDensity.compact,
                     iconSize: 20,
@@ -2323,10 +2323,11 @@ class _ComposerBar extends StatelessWidget {
               child: FutureBuilder<String?>(
                 future: loadCustomCategoryName(),
                 builder: (context, snap) {
-                  final label = displayCategoryLabel(
-                    selectedCategory,
-                    prefsCustomName: snap.data,
-                  );
+                 final label = displayCategoryLabel(
+                context,  // Aggiungi context come primo parametro
+                selectedCategory,
+                 prefsCustomName: snap.data,
+                 );
                   return Row(
                     children: [
                       Icon(selectedCategory.icon, color: color, size: 18),
@@ -2351,7 +2352,7 @@ class _ComposerBar extends StatelessWidget {
                     minLines: 1,
                     maxLength: 250,
                     decoration: InputDecoration(
-                      hintText: t.composerHint(),
+                      hintText: t.composerHint,
                       counterText: '',
                       errorText: textError.isEmpty ? null : textError,
                       contentPadding: const EdgeInsets.symmetric(
@@ -2500,19 +2501,19 @@ class _WelcomeOverlay extends StatelessWidget {
                   const Icon(Icons.waving_hand, size: 48),
                   const SizedBox(height: 8),
                   Text(
-                    t.welcomeTitle(),
+                    t.welcomeTitle,
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    t.welcomeBody(),
+                    t.welcomeBody,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: onClose,
-                    child: Text(t.understood()),
+                    child: Text(t.understood),
                   ),
                 ],
               ),

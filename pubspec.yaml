@@ -63,7 +63,17 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
   assets:
     - assets/app_logo.png
     - assets/google_logo.png
-  generate: true   # <-- lascia solo questo (niente gen-l10n qui)
+
+# Configurazione delle localizzazioni (sezione separata)
+flutter_intl:
+  enabled: true
+  arb_dir: lib/l10n
+  template_arb_file: app_en.arb
+  output_localization_file: app_localizations.dart
+  output_class: AppLocalizations
+  nullable_getter: false
+  synthetic_package: false

@@ -3,6 +3,7 @@
 // =============================================================================
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'gen_l10n/app_localizations.dart'; // Aggiungi questa importazione
 
 // =============================================================================
 //// 🔧 Helper: nome categoria personalizzata da SharedPreferences
@@ -18,15 +19,35 @@ Future<String?> loadCustomCategoryName() async {
 /// - se categoria = custom -> usa `messageCustomName` (se presente), altrimenti `prefsCustomName`.
 /// - altrimenti ritorna la label standard.
 String displayCategoryLabel(
+  BuildContext context, // Aggiungi il parametro context
   MessageCategory c, {
   String? messageCustomName,
   String? prefsCustomName,
 }) {
+  final t = AppLocalizations.of(context); // Ottieni le traduzioni
+  
   if (c == MessageCategory.custom) {
     final s = (messageCustomName ?? prefsCustomName ?? '').trim();
-    return s.isNotEmpty ? s : 'Personalizzata';
+    return s.isNotEmpty ? s : t.category_custom; // Usa la traduzione
   }
-  return c.label;
+  
+  // Usa le traduzioni per le categorie predefinite
+  switch (c) {
+    case MessageCategory.free:
+      return t.category_free;
+    case MessageCategory.warning:
+      return t.category_warning;
+    case MessageCategory.help:
+      return t.category_help;
+    case MessageCategory.event:
+      return t.category_events;
+    case MessageCategory.alert:
+      return t.category_notice;
+    case MessageCategory.info:
+      return t.category_info;
+    case MessageCategory.custom:
+      return t.category_custom;
+  }
 }
 
 // =============================================================================
@@ -39,8 +60,6 @@ enum MessageCategory {
   event('Eventi', Colors.purple, Icons.event),
   alert('Avvisi', Colors.amber, Icons.notification_important),
   info('Info', Colors.green, Icons.info),
-
-  // 🆕 Custom (l’etichetta effettiva la fornisce displayCategoryLabel)
   custom('Personalizzata', Color(0xFF455A64), Icons.tag);
 
   const MessageCategory(this.label, this.color, this.icon);
@@ -142,11 +161,12 @@ class CategorySelector extends StatelessWidget {
                         children: categories.map((category) {
                           final isSelected = selectedCategory == category;
                           final label = displayCategoryLabel(
+                            context, // Aggiungi context
                             category,
                             prefsCustomName: customName,
                           );
 
-                          // MOD: colori adattivi per il chip
+                          // MOD: colori adattivi per le chip
                           final Color chipBg = isSelected
                               ? category.color
                               : cs.surfaceContainerHighest;
@@ -298,11 +318,12 @@ class FilterSelector extends StatelessWidget {
                           children: categories.map((category) {
                             final isActive = activeFilters.contains(category);
                             final label = displayCategoryLabel(
+                              context, // Aggiungi context
                               category,
                               prefsCustomName: customName,
                             );
 
-                            // MOD: stile adattivo per i “bottoni” filtro
+                            // MOD: stile adattivo per i "bottoni" filtro
                             final bg = isActive
                                 ? _blendOn(
                                     cs.surface,
@@ -368,7 +389,7 @@ class FilterSelector extends StatelessWidget {
     );
   }
 
-  // MOD: piccolo helper per fondere un colore “accento” con una base (surface)
+  // MOD: piccolo helper per fondere un colore "accento" con una base (surface)
   Color _blendOn(Color base, Color overlay, double opacity) {
     // ignore: deprecated_member_use
     return Color.alphaBlend(overlay.withOpacity(opacity), base);
