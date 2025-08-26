@@ -232,10 +232,32 @@
   "@greyTheme": {},
   "greyThemeDescription": "Palette neutra in chiaro/scuro",
   "@greyThemeDescription": {},
+
   "english": "English",
-  "@english": {},
-  "italian": "Italiano",
-  "@italian": {},
+"@english": {},
+"italian": "Italiano", 
+"@italian": {},
+"german": "Deutsch",
+"@german": {},
+"spanish": "Español",
+"@spanish": {},
+"french": "Français",
+"@french": {},
+"ukrainian": "Українська",
+"@ukrainian": {},
+"russian": "Русский",
+"@russian": {},
+"portuguese": "Português",
+    "@portuguese": {},
+    "arabic": "العربية",
+    "@arabic": {},
+  "chinese": "中文",
+  "@chinese": {},
+  "japanese": "日本語",
+"@japanese": {},
+
+
+  
   "authorizationGranted": "Autorizzazione concessa",
   "@authorizationGranted": {},
   "requestAuthorization": "Richiedi autorizzazione",
@@ -299,4 +321,5 @@
   "@category_info": {},
   "category_custom": "Personalizzata",
   "@category_custom": {}
+
 }

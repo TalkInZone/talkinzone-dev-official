@@ -486,6 +486,114 @@ Future<void> _backfillNamesFromRecentMessages(Set<String> targetUids) async {
                       AppThemeController.instance.setLocale(l);
                     },
                   ),
+                   const Divider(height: 1),
+                  // Tedesco 
+                   RadioListTile<Locale>(
+                   title: Text(l10n.german),
+                   value: const Locale('de'),
+                   groupValue: _currentLocale,
+                   onChanged: (l) {
+                   if (l == null) return;
+                   AppThemeController.instance.setLocale(l);
+        },
+      ),           
+                   const Divider(height: 1),
+                // Spagnolo
+                   RadioListTile<Locale>(
+                   title: Text(l10n.spanish),
+                   value: const Locale('es'),
+                   groupValue: _currentLocale,
+                   onChanged: (l) {
+                   if (l == null) return;
+                   AppThemeController.instance.setLocale(l);
+  },
+),                
+               const Divider(height: 1),
+                // Francese (nuova lingua aggiunta)
+                   RadioListTile<Locale>(
+                   title: Text(l10n.french),
+                   value: const Locale('fr'),
+                   groupValue: _currentLocale,
+                   onChanged: (l) {
+                  if (l == null) return;
+                  AppThemeController.instance.setLocale(l);
+                  },
+                 ),
+                 const Divider(height: 1),
+                 // Ucraino
+                 RadioListTile<Locale>(
+                 title: Text(l10n.ukrainian),
+                 value: const Locale('uk'),
+                 groupValue: _currentLocale,
+                 onChanged: (l) {
+                 if (l == null) return;
+                 AppThemeController.instance.setLocale(l);
+    },
+),
+               const Divider(height: 1),
+              // Russo
+              RadioListTile<Locale>(
+              title: Text(l10n.russian),
+              value: const Locale('ru'),
+              groupValue: _currentLocale,
+              onChanged: (l) {
+              if (l == null) return;
+              AppThemeController.instance.setLocale(l);
+  },
+),
+              const Divider(height: 1),
+              // Portoghese 
+              RadioListTile<Locale>(
+              title: Text(l10n.portuguese),
+              value: const Locale('pt'),
+              groupValue: _currentLocale,
+              onChanged: (l) {
+              if (l == null) return;
+              AppThemeController.instance.setLocale(l);
+  },
+),
+
+           const Divider(height: 1),
+              // Arabo
+          RadioListTile<Locale>(
+           title: Text(l10n.arabic),
+           value: const Locale('ar'),
+           groupValue: _currentLocale,
+           onChanged: (l) {
+          if (l == null) return;
+          AppThemeController.instance.setLocale(l);
+  },
+),
+
+         const Divider(height: 1),
+        // Cinese
+        RadioListTile<Locale>(
+       title: Text(l10n.chinese),
+       value: const Locale('zh'),
+      groupValue: _currentLocale,
+       onChanged: (l) {
+      if (l == null) return;
+      AppThemeController.instance.setLocale(l);
+  },
+),
+
+const Divider(height: 1),
+// Giapponese
+RadioListTile<Locale>(
+  title: Text(l10n.japanese),
+  value: const Locale('ja'),
+  groupValue: _currentLocale,
+  onChanged: (l) {
+    if (l == null) return;
+    AppThemeController.instance.setLocale(l);
+  },
+),
+
+
+
+
+
+               
                 ],
               ),
             ),
