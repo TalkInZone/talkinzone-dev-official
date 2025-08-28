@@ -896,6 +896,18 @@ abstract class AppLocalizations {
   /// **'Save'**
   String get save;
 
+  /// No description provided for @selectCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Select category:'**
+  String get selectCategory;
+
+  /// No description provided for @filterByCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter messages by category:'**
+  String get filterByCategory;
+
   /// No description provided for @category_free.
   ///
   /// In en, this message translates to:
@@ -937,6 +949,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Custom'**
   String get category_custom;
+
+  /// Title of the delete confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete message?'**
+  String get deleteConfirmTitle;
+
+  /// Body of the delete confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'This will permanently remove your message for everyone.'**
+  String get deleteConfirmBody;
+
+  /// Action label to delete a message.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteMessage;
+
+  /// Snackbar when a message was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted'**
+  String get deleted;
+
+  /// Snackbar when delete fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t delete message'**
+  String get deleteError;
+
+  /// Tooltip for the trash icon in the bubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get tooltipDelete;
 }
 
 class _AppLocalizationsDelegate

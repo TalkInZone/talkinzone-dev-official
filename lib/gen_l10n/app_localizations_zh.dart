@@ -413,6 +413,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get save => '保存';
 
   @override
+  String get selectCategory => '选择类别：';
+
+  @override
+  String get filterByCategory => '按类别筛选消息：';
+
+  @override
   String get category_free => '自由';
 
   @override
@@ -432,4 +438,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get category_custom => '自定义';
+
+  @override
+  String get deleteConfirmTitle => '删除消息？';
+
+  @override
+  String get deleteConfirmBody => '这将为所有人永久删除您的消息。';
+
+  @override
+  String get deleteMessage => '删除';
+
+  @override
+  String get deleted => '已删除';
+
+  @override
+  String get deleteError => '无法删除消息';
+
+  @override
+  String get tooltipDelete => '删除';
 }

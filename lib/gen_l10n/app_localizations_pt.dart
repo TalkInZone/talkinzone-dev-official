@@ -426,6 +426,12 @@ class AppLocalizationsPt extends AppLocalizations {
   String get save => 'Salvar';
 
   @override
+  String get selectCategory => 'Selecionar categoria:';
+
+  @override
+  String get filterByCategory => 'Filtrar mensagens por categoria:';
+
+  @override
   String get category_free => 'Livre';
 
   @override
@@ -445,4 +451,23 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get category_custom => 'Personalizada';
+
+  @override
+  String get deleteConfirmTitle => 'Excluir mensagem?';
+
+  @override
+  String get deleteConfirmBody =>
+      'Isso removerá permanentemente sua mensagem para todos.';
+
+  @override
+  String get deleteMessage => 'Excluir';
+
+  @override
+  String get deleted => 'Excluída';
+
+  @override
+  String get deleteError => 'Não foi possível excluir a mensagem';
+
+  @override
+  String get tooltipDelete => 'Excluir';
 }

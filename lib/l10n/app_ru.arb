@@ -305,6 +305,10 @@
     "save": "Сохранить",
     "@save": {},
   
+    "selectCategory": "Выберите категорию:",
+    "@selectCategory": {},
+  "filterByCategory": "Фильтровать сообщения по категории:",
+    "@filterByCategory": {},
     "category_free": "Свободная",
     "@category_free": {},
     "category_warning": "Предупреждение",
@@ -318,5 +322,24 @@
     "category_info": "Информация",
     "@category_info": {},
     "category_custom": "Пользовательская",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+    "deleteConfirmTitle": "Удалить сообщение?",
+    "@deleteConfirmTitle": { "description": "Заголовок диалога подтверждения удаления." },
+    "deleteConfirmBody": "Это навсегда удалит ваше сообщение для всех.",
+    "@deleteConfirmBody": { "description": "Содержимое диалога подтверждения удаления." },
+    "deleteMessage": "Удалить",
+    "@deleteMessage": { "description": "Метка действия для удаления сообщения." },
+    "deleted": "Удалено",
+    "@deleted": { "description": "Уведомление когда сообщение было удалено." },
+    "deleteError": "Не удалось удалить сообщение",
+    "@deleteError": { "description": "Уведомление когда удаление не удалось." },
+    "tooltipDelete": "Удалить",
+    "@tooltipDelete": { "description": "Подсказка для значка корзины в пузыре." }
+
+
+
   }

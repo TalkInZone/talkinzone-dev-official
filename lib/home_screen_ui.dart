@@ -1,32 +1,32 @@
 // =============================================================================
-// 📦 FILE: home_screen_ui.dart  (I18N-READY)
+// 📦 FILE: home_screen_ui.dart  — delete con animazione + sync tra utenti
 // =============================================================================
-// ✅ What changed
-// - All hard-coded strings now come from AppLocalizations (EN default).
-// - Tiny helpers (_formatRelative/_formatDistance*) now use BuildContext to
-//   access localized strings (no logic changes).
-// - Tooltips, dialogs, snackbars, empty states, composer hint, etc. localized.
-// - No changes to data flow, callbacks, or rendering logic.
 //
-// Requires: import of `gen_l10n/app_localizations.dart` and the ARB keys
-// listed after this file.
+// Cosa cambia:
+// - Quando un utente elimina dal cestino, parte la stessa animazione di
+//   autodistruzione; al termine cancelliamo su Firestore.
+// - Se un altro utente osserva quel messaggio, riceve l’evento di DELETE dal
+//   doc snapshot e parte la STESSA animazione sulla sua GUI; al termine la
+//   bolla sparisce, senza necessità di riavviare l’app.
+// - Se la delete fallisce con "not-found" (perché l’ha già cancellato un altro),
+//   trattiamo la cosa come successo locale (sparisce).
+// - Footer della bolla reso responsive (Wrap) per stringhe lunghe.
+// - displayCategoryLabel(ctx, category, ...) chiamata col giusto primo argomento.
+//
+// Dipendenze: AppLocalizations, category_utils.dart, voice_message.dart
 // =============================================================================
 
 import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'gen_l10n/app_localizations.dart';
-import 'category_utils.dart'
-    show
-        MessageCategory,
-        CategorySelector,
-        FilterSelector,
-        loadCustomCategoryName,
-        displayCategoryLabel;
+import 'category_utils.dart';
 import 'voice_message.dart';
 
 Color _alpha(Color c, double opacity01) =>
@@ -220,6 +220,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
       _docSubs = {};
 
+  // 🔥 Gestione delete/animazione locale e remota
+  final Set<String> _locallyDeletedIds = {}; // dopo delete OK
+  final Set<String> _locallyDestructingIds = {}; // animazione in corso
+  final Set<String> _pendingRemoteDeletionIds = {}; // delete avviata altrove
+
   @override
   void initState() {
     super.initState();
@@ -246,6 +251,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
   void _refreshReactionSubscriptions() {
     final ids = widget.filteredMessages.map((m) => m.id).toSet();
 
+    // chiudi sub a messaggi non più visibili
     for (final id in _docSubs.keys.toList()) {
       if (!ids.contains(id)) {
         _docSubs[id]?.cancel();
@@ -255,15 +261,24 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
       }
     }
 
+    // (re)sub ai messaggi visibili
     for (final m in widget.filteredMessages) {
       final docRef =
           FirebaseFirestore.instance.collection('messages').doc(m.id);
 
       if (!_docSubs.containsKey(m.id)) {
         _docSubs[m.id] = docRef.snapshots().listen((snap) {
-          final data = snap.data();
-          if (data == null) return;
+          // 🔥 Se un altro utente ha cancellato il messaggio:
+          if (!snap.exists || snap.data() == null) {
+            // Avvia stessa animazione: al termine lo togliamo dalla lista
+            setState(() {
+              _locallyDestructingIds.add(m.id);
+              _pendingRemoteDeletionIds.add(m.id);
+            });
+            return;
+          }
 
+          final data = snap.data()!;
           final Map<String, int> counts = Map<String, int>.from(
             (data['reactions'] ?? const <String, int>{}).map((k, v) => MapEntry(
                   k.toString(),
@@ -320,7 +335,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
     if (diff.inMinutes < 1) return t.relNow;
     if (diff.inMinutes < 60) return t.relMinutesAgo(diff.inMinutes);
     if (diff.inHours < 24) return t.relHoursAgo(diff.inHours);
-    // Keep a short dd/MM HH:mm for both locales (simple & compact)
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(ts.day)}/${two(ts.month)} ${two(ts.hour)}:${two(ts.minute)}';
   }
@@ -630,8 +644,7 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                       opacity: selected ? 0.55 : 1.0,
                       child: Text(
                         e,
-                        style:
-                            const TextStyle(fontSize: emojiSize, height: 1.2),
+                        style: const TextStyle(fontSize: 22.0, height: 1.2),
                       ),
                     ),
                   ),
@@ -736,6 +749,11 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
 
     _AdaptivePalette.of(context, accent: widget.selectedCategory.color);
 
+    // Filtra quelli già rimossi localmente
+    final visibleMessages = widget.filteredMessages
+        .where((m) => !_locallyDeletedIds.contains(m.id))
+        .toList();
+
     return Stack(
       children: [
         Column(
@@ -771,17 +789,42 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
             Expanded(
               child: widget.isInitialized
                   ? _MessagesList(
-                      messages: widget.filteredMessages,
+                      messages: visibleMessages,
                       playingMessageId: widget.playingMessageId,
                       currentUserId: widget.currentUserId,
                       onPlayMessage: widget.onPlayMessage,
                       onToggleReaction: widget.onToggleReaction,
                       onTextVisible: _notifyTextVisibleOnce,
-                     labelBuilder: (m) => displayCategoryLabel(
-                     context,  // Aggiungi context come primo parametro
-                     m.category,
-                     messageCustomName: m.customCategoryName,
-                     ),
+
+                      // 🔥 DELETE con animazione e sync
+                      isDestructing: (id) =>
+                          _locallyDestructingIds.contains(id),
+                      onStartDestruct: (id) {
+                        setState(() => _locallyDestructingIds.add(id));
+                      },
+                      onCancelDestruct: (id) {
+                        setState(() => _locallyDestructingIds.remove(id));
+                      },
+                      onLocallyDeleted: (id) {
+                        setState(() {
+                          _locallyDeletedIds.add(id);
+                          _locallyDestructingIds.remove(id);
+                        });
+                      },
+                      isRemoteDeletion: (id) =>
+                          _pendingRemoteDeletionIds.contains(id),
+                      onRemoteDeletionClear: (id) {
+                        setState(() {
+                          _pendingRemoteDeletionIds.remove(id);
+                        });
+                      },
+
+                      // label / info
+                      labelBuilder: (m) => displayCategoryLabel(
+                        context,
+                        m.category,
+                        messageCustomName: m.customCategoryName,
+                      ),
                       userNameBuilder: (m) {
                         final myId = widget.currentUserId ?? '';
                         if (m.senderId == myId) return t.you;
@@ -896,10 +939,10 @@ class _TopBar extends StatelessWidget {
                   future: loadCustomCategoryName(),
                   builder: (context, snap) {
                     final label = displayCategoryLabel(
-                    context,  // Aggiungi context come primo parametro
-                    selectedCategory,
-                     prefsCustomName: snap.data,
-                );
+                      context,
+                      selectedCategory,
+                      prefsCustomName: snap.data,
+                    );
                     return Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 10),
@@ -1005,7 +1048,7 @@ class _RadiusSelector extends StatelessWidget {
 }
 
 // =============================================================================
-// 📨 Messages list
+// 📨 Messages list (gestisce delete animato + sync tra utenti)
 // =============================================================================
 class _MessagesList extends StatelessWidget {
   final List<VoiceMessage> messages;
@@ -1035,6 +1078,16 @@ class _MessagesList extends StatelessWidget {
   final void Function(VoiceMessage message)? onRequestBlockUser;
   final void Function(VoiceMessage message)? onRequestReportUser;
 
+  // 🔥 DELETE animato – gestito insieme al parent
+  final bool Function(String messageId) isDestructing;
+  final void Function(String messageId) onStartDestruct;
+  final void Function(String messageId) onCancelDestruct;
+  final void Function(String messageId) onLocallyDeleted;
+
+  // 🔁 Distinzione tra delete locale e delete remota (arrivata via snapshot)
+  final bool Function(String messageId) isRemoteDeletion;
+  final void Function(String messageId) onRemoteDeletionClear;
+
   const _MessagesList({
     required this.messages,
     required this.playingMessageId,
@@ -1049,6 +1102,12 @@ class _MessagesList extends StatelessWidget {
     required this.pal,
     required this.showReactionsOverlay,
     required this.reactionsBuilder,
+    required this.isDestructing,
+    required this.onStartDestruct,
+    required this.onCancelDestruct,
+    required this.onLocallyDeleted,
+    required this.isRemoteDeletion,
+    required this.onRemoteDeletionClear,
     this.onRequestBlockUser,
     this.onRequestReportUser,
   });
@@ -1228,6 +1287,69 @@ class _MessagesList extends StatelessWidget {
     }
   }
 
+  // ---------- Delete flow: avvia animazione, il resto al termine ----------
+  Future<void> _confirmAndDelete(BuildContext context, VoiceMessage m) async {
+    final t = AppLocalizations.of(context);
+
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(t.deleteConfirmTitle),
+            content: Text(t.deleteConfirmBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(t.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(t.deleteMessage),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!ok) return;
+
+    // 1) avvia l'animazione nella bolla
+    onStartDestruct(m.id);
+    // 2) al termine (onDestructEnd) chiamiamo _finalizeDelete(...)
+  }
+
+  Future<void> _finalizeDelete(BuildContext context, VoiceMessage m) async {
+    final t = AppLocalizations.of(context);
+    try {
+      await FirebaseFirestore.instance
+          .collection('messages')
+          .doc(m.id)
+          .delete();
+
+      onLocallyDeleted(m.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(t.deleted)));
+      }
+    } catch (e) {
+      // Se è già stato eliminato da qualcun altro, trattiamo come successo
+      if (e is FirebaseException && e.code == 'not-found') {
+        onLocallyDeleted(m.id);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(t.deleted)));
+        }
+        return;
+      }
+      // Altrimenti rollback animazione
+      onCancelDestruct(m.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${t.deleteError}: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _showMessageActions(
     BuildContext context,
     VoiceMessage m,
@@ -1283,13 +1405,21 @@ class _MessagesList extends StatelessWidget {
                           try {
                             onRequestBlockUser!(m);
                             return;
-                          } catch (_) {
-                            // fallback below
-                          }
+                          } catch (_) {}
                         }
                         await _blockFlow(context, m);
                       },
               ),
+              if (isMine)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: Text(t.deleteMessage),
+                  subtitle: Text(t.deleteConfirmBody),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _confirmAndDelete(context, m);
+                  },
+                ),
               const SizedBox(height: 4),
             ],
           ),
@@ -1347,8 +1477,24 @@ class _MessagesList extends StatelessWidget {
           onLongPress: (key) => _showMessageActions(context, m, key),
           onOpenReactions: openReactionsLocal,
           onToggleReaction: (emoji) => onToggleReaction(m, emoji),
+
+          // 🔥 click cestino → conferma → start animazione
+          onDelete: () => _confirmAndDelete(context, m),
           pal: pal,
           reactions: reactions,
+
+          // ➕ forza animazione quando richiesto (locale o remota)
+          forceDestruct: isDestructing(m.id),
+          onDestructEnd: (id) {
+            // Se è una delete "remota", alla fine animazione togliamo e basta
+            if (isRemoteDeletion(id)) {
+              onLocallyDeleted(id);
+              onRemoteDeletionClear(id);
+            } else {
+              // delete locale (cestino) o TTL: prova a cancellare backend
+              _finalizeDelete(context, m);
+            }
+          },
         );
       },
     );
@@ -1372,8 +1518,13 @@ class _ChatBubble extends StatefulWidget {
   final void Function(GlobalKey) onLongPress;
   final void Function(GlobalKey) onOpenReactions;
   final void Function(String emoji) onToggleReaction;
+  final VoidCallback onDelete;
   final _AdaptivePalette pal;
   final Map<String, int> reactions;
+
+  // 🔥 distruzione forzata (per delete o delete remota) + callback fine animazione
+  final bool forceDestruct;
+  final void Function(String messageId) onDestructEnd;
 
   const _ChatBubble({
     super.key,
@@ -1388,8 +1539,11 @@ class _ChatBubble extends StatefulWidget {
     required this.onLongPress,
     required this.onOpenReactions,
     required this.onToggleReaction,
+    required this.onDelete,
     required this.pal,
     required this.reactions,
+    required this.forceDestruct,
+    required this.onDestructEnd,
   });
 
   @override
@@ -1401,6 +1555,7 @@ class _ChatBubbleState extends State<_ChatBubble>
   late final AnimationController _destructCtrl;
   Timer? _startTimer;
   bool _started = false;
+  bool _forcedRunning = false; // true → distruzione forzata (delete/remote)
 
   DateTime get _expiry => widget.message.timestamp.add(_kMessageTTL);
 
@@ -1411,19 +1566,55 @@ class _ChatBubbleState extends State<_ChatBubble>
       vsync: this,
       duration: _kDestructWindow,
     );
+
+    _destructCtrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed && _forcedRunning) {
+        widget.onDestructEnd(widget.message.id);
+      }
+      // Se la distruzione è partita per TTL (non forzata), completiamo comunque
+      // la dissolvenza: al rebuild superiore verrà chiamato onDestructEnd.
+      if (status == AnimationStatus.completed && !_forcedRunning) {
+        widget.onDestructEnd(widget.message.id);
+      }
+    });
+
     _scheduleDestruction();
   }
 
   @override
   void didUpdateWidget(covariant _ChatBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // Reset quando cambia messaggio/ts
     if (oldWidget.message.id != widget.message.id ||
         oldWidget.message.timestamp != widget.message.timestamp) {
       _startTimer?.cancel();
       _destructCtrl.stop();
       _destructCtrl.value = 0;
       _started = false;
+      _forcedRunning = false;
       _scheduleDestruction();
+    }
+
+    // 🔥 Trigger animazione forzata quando forceDestruct diventa true
+    if (!oldWidget.forceDestruct && widget.forceDestruct) {
+      _startTimer?.cancel(); // interrompi countdown TTL
+      _forcedRunning = true;
+      _started = true;
+      _destructCtrl.forward(from: 0);
+      setState(() {});
+    }
+
+    // Se prima era forzata e ora non più (rollback), ripristina stato
+    if (oldWidget.forceDestruct && !widget.forceDestruct) {
+      if (_forcedRunning) {
+        _forcedRunning = false;
+        _destructCtrl.stop();
+        _destructCtrl.value = 0;
+        _started = false;
+        _scheduleDestruction(); // riparti con logica TTL
+        setState(() {});
+      }
     }
   }
 
@@ -1446,7 +1637,7 @@ class _ChatBubbleState extends State<_ChatBubble>
     }
     final delay = startAt.difference(now);
     _startTimer = Timer(delay, () {
-      if (!mounted) return;
+      if (!mounted || widget.forceDestruct) return; // se parte forced, ignora
       _started = true;
       _destructCtrl.forward(from: 0);
       setState(() {});
@@ -1478,6 +1669,7 @@ class _ChatBubbleState extends State<_ChatBubble>
           onLongPress: widget.onLongPress,
           onOpenReactions: widget.onOpenReactions,
           onToggleReaction: widget.onToggleReaction,
+          onDelete: widget.onDelete,
           pal: widget.pal,
           reactions: widget.reactions,
           destructProgress: progress,
@@ -1502,10 +1694,10 @@ class _ChatBubbleVisual extends StatelessWidget {
   final void Function(GlobalKey) onLongPress;
   final void Function(GlobalKey) onOpenReactions;
   final void Function(String emoji) onToggleReaction;
+  final VoidCallback? onDelete;
   final _AdaptivePalette pal;
   final Map<String, int> reactions;
 
-  // 🧨 SELF-DESTRUCT
   final double destructProgress;
   final int destructSeed;
 
@@ -1521,6 +1713,7 @@ class _ChatBubbleVisual extends StatelessWidget {
     required this.onLongPress,
     required this.onOpenReactions,
     required this.onToggleReaction,
+    required this.onDelete,
     required this.pal,
     required this.reactions,
     required this.destructProgress,
@@ -1619,6 +1812,7 @@ class _ChatBubbleVisual extends StatelessWidget {
       onPlay: onPlay,
       isPlaying: isPlaying,
       onOpenReactions: () => onOpenReactions(_bubbleKey),
+      onDelete: onDelete,
     );
 
     final erodible = (destructProgress > 0)
@@ -1649,7 +1843,6 @@ class _ChatBubbleVisual extends StatelessWidget {
   }
 }
 
-// (Self-destruct visuals unchanged…)
 class _ErodeAndDust extends StatelessWidget {
   final double progress;
   final int seed;
@@ -1869,7 +2062,7 @@ class _DustPainter extends CustomPainter {
 }
 
 // =============================================================================
-// 💡 Bubble core
+// 💡 Bubble core (footer responsive)
 // =============================================================================
 class _BubbleCore extends StatelessWidget {
   final Color bubbleBg;
@@ -1890,6 +2083,7 @@ class _BubbleCore extends StatelessWidget {
   final VoidCallback onPlay;
   final bool isPlaying;
   final VoidCallback onOpenReactions;
+  final VoidCallback? onDelete;
 
   const _BubbleCore({
     super.key,
@@ -1911,6 +2105,7 @@ class _BubbleCore extends StatelessWidget {
     required this.onPlay,
     required this.isPlaying,
     required this.onOpenReactions,
+    this.onDelete,
   });
 
   @override
@@ -1954,9 +2149,12 @@ class _BubbleCore extends StatelessWidget {
                 const SizedBox(width: 8),
                 const Icon(Icons.location_on, size: 16, color: Colors.grey),
                 const SizedBox(width: 2),
-                Text(
-                  distanceLabel,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                Flexible(
+                  child: Text(
+                    distanceLabel,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -2020,34 +2218,73 @@ class _BubbleCore extends StatelessWidget {
               ),
             ),
 
-          // Footer: time + emoji + countdown + views
+          // Footer RESPONSIVE
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(width: 4),
-                Text(
-                  timeLabel,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey[700],
-                    fontWeight: FontWeight.w600,
+                // Tempo
+                Flexible(
+                  flex: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      timeLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
-                const Spacer(),
-                Tooltip(
-                  message: t.tooltipReactions,
-                  child: IconButton(
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 20,
-                    onPressed: onOpenReactions,
-                    icon: const Icon(Icons.emoji_emotions_outlined),
+                const SizedBox(width: 6),
+
+                // Controlli destri: Wrap per andare a capo se serve
+                Flexible(
+                  flex: 0,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        Tooltip(
+                          message: t.tooltipReactions,
+                          child: IconButton(
+                            visualDensity: VisualDensity.compact,
+                            iconSize: 20,
+                            onPressed: onOpenReactions,
+                            icon: const Icon(Icons.emoji_emotions_outlined),
+                          ),
+                        ),
+                        if (isMine)
+                          Tooltip(
+                            message: t.tooltipDelete,
+                            child: IconButton(
+                              visualDensity: VisualDensity.compact,
+                              iconSize: 20,
+                              onPressed: onDelete,
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ),
+                        DefaultTextStyle.merge(
+                          style: const TextStyle(fontSize: 12),
+                          child: countdownChip(),
+                        ),
+                        DefaultTextStyle.merge(
+                          style: const TextStyle(fontSize: 12),
+                          child: viewsChip(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 4),
-                countdownChip(),
-                const SizedBox(width: 12),
-                viewsChip(),
               ],
             ),
           ),
@@ -2323,11 +2560,11 @@ class _ComposerBar extends StatelessWidget {
               child: FutureBuilder<String?>(
                 future: loadCustomCategoryName(),
                 builder: (context, snap) {
-                 final label = displayCategoryLabel(
-                context,  // Aggiungi context come primo parametro
-                selectedCategory,
-                 prefsCustomName: snap.data,
-                 );
+                  final label = displayCategoryLabel(
+                    context,
+                    selectedCategory,
+                    prefsCustomName: snap.data,
+                  );
                   return Row(
                     children: [
                       Icon(selectedCategory.icon, color: color, size: 18),

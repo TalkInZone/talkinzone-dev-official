@@ -305,6 +305,10 @@
     "save": "حفظ",
     "@save": {},
   
+     "selectCategory": "اختر الفئة:",
+    "@selectCategory": {},
+  "filterByCategory": "تصفية الرسائل حسب الفئة:",
+    "@filterByCategory": {},
     "category_free": "حر",
     "@category_free": {},
     "category_warning": "تحذير",
@@ -318,5 +322,28 @@
     "category_info": "معلومات",
     "@category_info": {},
     "category_custom": "مخصص",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+
+
+
+
+    "deleteConfirmTitle": "حذف الرسالة؟",
+    "@deleteConfirmTitle": { "description": "عنوان مربع حوار تأكيد الحذف." },
+    "deleteConfirmBody": "سيؤدي هذا إلى إزالة رسالتك نهائياً للجميع.",
+    "@deleteConfirmBody": { "description": "محتوى مربع حوار تأكيد الحذف." },
+    "deleteMessage": "حذف",
+    "@deleteMessage": { "description": "تسمية الإجراء لحذف رسالة." },
+    "deleted": "تم الحذف",
+    "@deleted": { "description": "شريط الإشعار عند حذف رسالة." },
+    "deleteError": "تعذر حذف الرسالة",
+    "@deleteError": { "description": "شريط الإشعار عند فشل الحذف." },
+    "tooltipDelete": "حذف",
+    "@tooltipDelete": { "description": "تلميح الأداة لأيقونة سلة المهملات في الفقاعة." }
+
+
+
   }

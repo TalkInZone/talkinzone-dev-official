@@ -305,6 +305,10 @@
     "save": "Salvar",
     "@save": {},
   
+     "selectCategory": "Selecionar categoria:",
+    "@selectCategory": {},
+  "filterByCategory": "Filtrar mensagens por categoria:",
+    "@filterByCategory": {},
     "category_free": "Livre",
     "@category_free": {},
     "category_warning": "Aviso",
@@ -318,5 +322,29 @@
     "category_info": "Informação",
     "@category_info": {},
     "category_custom": "Personalizada",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+
+
+    "deleteConfirmTitle": "Excluir mensagem?",
+    "@deleteConfirmTitle": { "description": "Título da caixa de diálogo de confirmação de exclusão." },
+    "deleteConfirmBody": "Isso removerá permanentemente sua mensagem para todos.",
+    "@deleteConfirmBody": { "description": "Corpo da caixa de diálogo de confirmação de exclusão." },
+    "deleteMessage": "Excluir",
+    "@deleteMessage": { "description": "Rótulo da ação para excluir uma mensagem." },
+    "deleted": "Excluída",
+    "@deleted": { "description": "Snackbar quando uma mensagem foi excluída." },
+    "deleteError": "Não foi possível excluir a mensagem",
+    "@deleteError": { "description": "Snackbar quando a exclusão falha." },
+    "tooltipDelete": "Excluir",
+    "@tooltipDelete": { "description": "Tooltip para o ícone de lixeira na bolha." }
+
+
+
+
+
+
   }

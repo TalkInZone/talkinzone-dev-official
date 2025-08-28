@@ -428,6 +428,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get save => 'Sauvegarder';
 
   @override
+  String get selectCategory => 'Sélectionner la catégorie:';
+
+  @override
+  String get filterByCategory => 'Filtrer les messages par catégorie:';
+
+  @override
   String get category_free => 'Libre';
 
   @override
@@ -447,4 +453,23 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get category_custom => 'Personnalisée';
+
+  @override
+  String get deleteConfirmTitle => 'Supprimer le message ?';
+
+  @override
+  String get deleteConfirmBody =>
+      'Cela supprimera définitivement votre message pour tout le monde.';
+
+  @override
+  String get deleteMessage => 'Supprimer';
+
+  @override
+  String get deleted => 'Supprimé';
+
+  @override
+  String get deleteError => 'Impossible de supprimer le message';
+
+  @override
+  String get tooltipDelete => 'Supprimer';
 }

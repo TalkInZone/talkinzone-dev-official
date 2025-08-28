@@ -305,7 +305,12 @@
     "save": "Guardar",
     "@save": {},
   
-    "category_free": "Libre",
+    
+      "selectCategory": "Seleccionar categoría:",
+    "@selectCategory": {},
+      "filterByCategory": "Filtrar mensajes por categoría:",
+    "@filterByCategory": {},
+      "category_free": "Libre",
     "@category_free": {},
     "category_warning": "Advertencia",
     "@category_warning": {},
@@ -318,5 +323,24 @@
     "category_info": "Información",
     "@category_info": {},
     "category_custom": "Personalizada",
-    "@category_custom": {}
+    "@category_custom": {},
+    
+
+
+
+    "deleteConfirmTitle": "¿Eliminar mensaje?",
+    "@deleteConfirmTitle": { "description": "Título del diálogo de confirmación de eliminación." },
+    "deleteConfirmBody": "Esto eliminará permanentemente tu mensaje para todos.",
+    "@deleteConfirmBody": { "description": "Cuerpo del diálogo de confirmación de eliminación." },
+    "deleteMessage": "Eliminar",
+    "@deleteMessage": { "description": "Etiqueta de acción para eliminar un mensaje." },
+    "deleted": "Eliminado",
+    "@deleted": { "description": "Snackbar cuando un mensaje fue eliminado." },
+    "deleteError": "No se pudo eliminar el mensaje",
+    "@deleteError": { "description": "Snackbar cuando falla la eliminación." },
+    "tooltipDelete": "Eliminar",
+    "@tooltipDelete": { "description": "Tooltip para el icono de papelera en la burbuja." }
+
+
+    
   }

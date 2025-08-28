@@ -305,6 +305,10 @@
     "save": "保存",
     "@save": {},
   
+   "selectCategory": "カテゴリを選択：",
+    "@selectCategory": {},
+  "filterByCategory": "カテゴリでメッセージをフィルタリング：",
+    "@filterByCategory": {},
     "category_free": "フリー",
     "@category_free": {},
     "category_warning": "警告",
@@ -318,5 +322,28 @@
     "category_info": "情報",
     "@category_info": {},
     "category_custom": "カスタム",
-    "@category_custom": {}
+    "@category_custom": {},
+
+    
+
+
+    "deleteConfirmTitle": "メッセージを削除しますか？",
+    "@deleteConfirmTitle": { "description": "削除確認ダイアログのタイトル。" },
+    "deleteConfirmBody": "このメッセージは全員から完全に削除されます。",
+    "@deleteConfirmBody": { "description": "削除確認ダイアログの本文。" },
+    "deleteMessage": "削除",
+    "@deleteMessage": { "description": "メッセージを削除するアクションラベル。" },
+    "deleted": "削除済み",
+    "@deleted": { "description": "メッセージが削除された時のスナックバー。" },
+    "deleteError": "メッセージを削除できませんでした",
+    "@deleteError": { "description": "削除に失敗した時のスナックバー。" },
+    "tooltipDelete": "削除",
+    "@tooltipDelete": { "description": "バブル内のゴミ箱アイコンのツールチップ。" }
+
+
+
+
+
+
+
   }

@@ -305,6 +305,10 @@
     "save": "Speichern",
     "@save": {},
   
+    "selectCategory": "Kategorie auswählen:",
+    "@selectCategory": {},
+  "filterByCategory": "Nachrichten nach Kategorie filtern:",
+    "@filterByCategory": {},
     "category_free": "Frei",
     "@category_free": {},
     "category_warning": "Warnung", 
@@ -318,6 +322,26 @@
     "category_info": "Info",
     "@category_info": {},
     "category_custom": "Benutzerdefiniert",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+
+
+
+    "deleteConfirmTitle": "Nachricht löschen?",
+    "@deleteConfirmTitle": { "description": "Titel des Bestätigungsdialogs zum Löschen." },
+    "deleteConfirmBody": "Dies wird Ihre Nachricht dauerhaft für alle entfernen.",
+    "@deleteConfirmBody": { "description": "Inhalt des Bestätigungsdialogs zum Löschen." },
+    "deleteMessage": "Löschen",
+    "@deleteMessage": { "description": "Aktionsbezeichnung zum Löschen einer Nachricht." },
+    "deleted": "Gelöscht",
+    "@deleted": { "description": "Snackbar wenn eine Nachricht gelöscht wurde." },
+    "deleteError": "Nachricht konnte nicht gelöscht werden",
+    "@deleteError": { "description": "Snackbar wenn das Löschen fehlschlägt." },
+    "tooltipDelete": "Löschen",
+    "@tooltipDelete": { "description": "Tooltip für das Papierkorb-Symbol in der Blase." }
+
 
   }

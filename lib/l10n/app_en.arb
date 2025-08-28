@@ -248,12 +248,12 @@
   "russian": "Русский",
   "@russian": {},
   "portuguese": "Português",
-      "@portuguese": {},
-      "arabic": "العربية",
-      "@arabic": {},
-    "chinese": "中文",
-    "@chinese": {},
-    "japanese": "日本語",
+  "@portuguese": {},
+  "arabic": "العربية",
+  "@arabic": {},
+  "chinese": "中文",
+  "@chinese": {},
+  "japanese": "日本語",
   "@japanese": {},
   
   "authorizationGranted": "Authorization granted",
@@ -305,6 +305,10 @@
   "save": "Save",
   "@save": {},
 
+  "selectCategory": "Select category:",
+  "@selectCategory": {},
+  "filterByCategory": "Filter messages by category:",
+  "@filterByCategory": {},
   "category_free": "Free",
   "@category_free": {},
   "category_warning": "Warning", 
@@ -318,7 +322,18 @@
   "category_info": "Info",
   "@category_info": {},
   "category_custom": "Custom",
-  "@category_custom": {}
+  "@category_custom": {},
 
-  
+  "deleteConfirmTitle": "Delete message?",
+  "@deleteConfirmTitle": { "description": "Title of the delete confirmation dialog." },
+  "deleteConfirmBody": "This will permanently remove your message for everyone.",
+  "@deleteConfirmBody": { "description": "Body of the delete confirmation dialog." },
+  "deleteMessage": "Delete",
+  "@deleteMessage": { "description": "Action label to delete a message." },
+  "deleted": "Deleted",
+  "@deleted": { "description": "Snackbar when a message was deleted." },
+  "deleteError": "Couldn't delete message",
+  "@deleteError": { "description": "Snackbar when delete fails." },
+  "tooltipDelete": "Delete",
+  "@tooltipDelete": { "description": "Tooltip for the trash icon in the bubble." }
 }

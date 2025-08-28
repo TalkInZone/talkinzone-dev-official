@@ -305,6 +305,10 @@
     "save": "Зберегти",
     "@save": {},
   
+    "selectCategory": "Виберіть категорію:",
+    "@selectCategory": {},
+  "filterByCategory": "Фільтрувати повідомлення за категорією:",
+    "@filterByCategory": {},
     "category_free": "Вільна",
     "@category_free": {},
     "category_warning": "Попередження",
@@ -318,5 +322,24 @@
     "category_info": "Інформація",
     "@category_info": {},
     "category_custom": "Користувацька",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+
+    "deleteConfirmTitle": "Видалити повідомлення?",
+    "@deleteConfirmTitle": { "description": "Заголовок діалогу підтвердження видалення." },
+    "deleteConfirmBody": "Це назавжди видалить ваше повідомлення для всіх.",
+    "@deleteConfirmBody": { "description": "Вміст діалогу підтвердження видалення." },
+    "deleteMessage": "Видалити",
+    "@deleteMessage": { "description": "Мітка дії для видалення повідомлення." },
+    "deleted": "Видалено",
+    "@deleted": { "description": "Повідомлення коли повідомлення було видалено." },
+    "deleteError": "Не вдалося видалити повідомлення",
+    "@deleteError": { "description": "Повідомлення коли видалення не вдалося." },
+    "tooltipDelete": "Видалити",
+    "@tooltipDelete": { "description": "Підказка для значка кошика в бульбашці." }
+
+
   }

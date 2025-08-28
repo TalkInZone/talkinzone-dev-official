@@ -414,6 +414,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get save => '保存';
 
   @override
+  String get selectCategory => 'カテゴリを選択：';
+
+  @override
+  String get filterByCategory => 'カテゴリでメッセージをフィルタリング：';
+
+  @override
   String get category_free => 'フリー';
 
   @override
@@ -433,4 +439,22 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get category_custom => 'カスタム';
+
+  @override
+  String get deleteConfirmTitle => 'メッセージを削除しますか？';
+
+  @override
+  String get deleteConfirmBody => 'このメッセージは全員から完全に削除されます。';
+
+  @override
+  String get deleteMessage => '削除';
+
+  @override
+  String get deleted => '削除済み';
+
+  @override
+  String get deleteError => 'メッセージを削除できませんでした';
+
+  @override
+  String get tooltipDelete => '削除';
 }

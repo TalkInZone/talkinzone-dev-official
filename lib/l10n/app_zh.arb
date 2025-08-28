@@ -305,6 +305,10 @@
     "save": "保存",
     "@save": {},
   
+   "selectCategory": "选择类别：",
+    "@selectCategory": {},
+  "filterByCategory": "按类别筛选消息：",
+    "@filterByCategory": {},
     "category_free": "自由",
     "@category_free": {},
     "category_warning": "警告",
@@ -318,5 +322,25 @@
     "category_info": "信息",
     "@category_info": {},
     "category_custom": "自定义",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+
+    "deleteConfirmTitle": "删除消息？",
+    "@deleteConfirmTitle": { "description": "删除确认对话框的标题。" },
+    "deleteConfirmBody": "这将为所有人永久删除您的消息。",
+    "@deleteConfirmBody": { "description": "删除确认对话框的正文。" },
+    "deleteMessage": "删除",
+    "@deleteMessage": { "description": "删除消息的操作标签。" },
+    "deleted": "已删除",
+    "@deleted": { "description": "消息被删除时的提示条。" },
+    "deleteError": "无法删除消息",
+    "@deleteError": { "description": "删除失败时的提示条。" },
+    "tooltipDelete": "删除",
+    "@tooltipDelete": { "description": "气泡中垃圾桶图标的工具提示。" }
+
+
+
   }

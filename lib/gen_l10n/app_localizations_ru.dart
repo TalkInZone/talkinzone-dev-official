@@ -426,6 +426,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get save => 'Сохранить';
 
   @override
+  String get selectCategory => 'Выберите категорию:';
+
+  @override
+  String get filterByCategory => 'Фильтровать сообщения по категории:';
+
+  @override
   String get category_free => 'Свободная';
 
   @override
@@ -445,4 +451,23 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get category_custom => 'Пользовательская';
+
+  @override
+  String get deleteConfirmTitle => 'Удалить сообщение?';
+
+  @override
+  String get deleteConfirmBody =>
+      'Это навсегда удалит ваше сообщение для всех.';
+
+  @override
+  String get deleteMessage => 'Удалить';
+
+  @override
+  String get deleted => 'Удалено';
+
+  @override
+  String get deleteError => 'Не удалось удалить сообщение';
+
+  @override
+  String get tooltipDelete => 'Удалить';
 }

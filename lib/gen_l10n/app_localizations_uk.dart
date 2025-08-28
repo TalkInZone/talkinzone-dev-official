@@ -424,6 +424,12 @@ class AppLocalizationsUk extends AppLocalizations {
   String get save => 'Зберегти';
 
   @override
+  String get selectCategory => 'Виберіть категорію:';
+
+  @override
+  String get filterByCategory => 'Фільтрувати повідомлення за категорією:';
+
+  @override
   String get category_free => 'Вільна';
 
   @override
@@ -443,4 +449,23 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get category_custom => 'Користувацька';
+
+  @override
+  String get deleteConfirmTitle => 'Видалити повідомлення?';
+
+  @override
+  String get deleteConfirmBody =>
+      'Це назавжди видалить ваше повідомлення для всіх.';
+
+  @override
+  String get deleteMessage => 'Видалити';
+
+  @override
+  String get deleted => 'Видалено';
+
+  @override
+  String get deleteError => 'Не вдалося видалити повідомлення';
+
+  @override
+  String get tooltipDelete => 'Видалити';
 }

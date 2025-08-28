@@ -305,6 +305,10 @@
     "save": "Sauvegarder",
     "@save": {},
   
+     "selectCategory": "Sélectionner la catégorie:",
+    "@selectCategory": {},
+    "filterByCategory": "Filtrer les messages par catégorie:",
+    "@filterByCategory": {},
     "category_free": "Libre",
     "@category_free": {},
     "category_warning": "Avertissement",
@@ -318,5 +322,24 @@
     "category_info": "Info",
     "@category_info": {},
     "category_custom": "Personnalisée",
-    "@category_custom": {}
+    "@category_custom": {},
+
+
+
+
+    "deleteConfirmTitle": "Supprimer le message ?",
+    "@deleteConfirmTitle": { "description": "Titre de la boîte de dialogue de confirmation de suppression." },
+    "deleteConfirmBody": "Cela supprimera définitivement votre message pour tout le monde.",
+    "@deleteConfirmBody": { "description": "Corps de la boîte de dialogue de confirmation de suppression." },
+    "deleteMessage": "Supprimer",
+    "@deleteMessage": { "description": "Libellé d'action pour supprimer un message." },
+    "deleted": "Supprimé",
+    "@deleted": { "description": "Snackbar quand un message a été supprimé." },
+    "deleteError": "Impossible de supprimer le message",
+    "@deleteError": { "description": "Snackbar quand la suppression échoue." },
+    "tooltipDelete": "Supprimer",
+    "@tooltipDelete": { "description": "Info-bulle pour l'icône de corbeille dans la bulle." }
+
+
+
   }

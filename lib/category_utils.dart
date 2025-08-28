@@ -85,6 +85,7 @@ class CategorySelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context); // Aggiungi questa linea
     // MOD: palette dinamica dal tema
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -146,7 +147,7 @@ class CategorySelector extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Seleziona categoria:',
+                      t.selectCategory, // MOD: Usa la traduzione
                       style: TextStyle(
                         // MOD: testo sul tema
                         color: cs.onSurface,
@@ -238,6 +239,7 @@ class FilterSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context); // Aggiungi questa linea
     // MOD: palette dinamica dal tema
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -297,7 +299,7 @@ class FilterSelector extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Filtra messaggi per categoria:',
+                      t.filterByCategory, // MOD: Usa la traduzione
                       style: TextStyle(
                         // MOD: testo sul tema
                         color: cs.onSurface,

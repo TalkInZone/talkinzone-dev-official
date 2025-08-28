@@ -421,6 +421,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get save => 'حفظ';
 
   @override
+  String get selectCategory => 'اختر الفئة:';
+
+  @override
+  String get filterByCategory => 'تصفية الرسائل حسب الفئة:';
+
+  @override
   String get category_free => 'حر';
 
   @override
@@ -440,4 +446,22 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get category_custom => 'مخصص';
+
+  @override
+  String get deleteConfirmTitle => 'حذف الرسالة؟';
+
+  @override
+  String get deleteConfirmBody => 'سيؤدي هذا إلى إزالة رسالتك نهائياً للجميع.';
+
+  @override
+  String get deleteMessage => 'حذف';
+
+  @override
+  String get deleted => 'تم الحذف';
+
+  @override
+  String get deleteError => 'تعذر حذف الرسالة';
+
+  @override
+  String get tooltipDelete => 'حذف';
 }
