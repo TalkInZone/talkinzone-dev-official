@@ -23,6 +23,7 @@ import 'voice_message.dart';
 import 'services/user_profile.dart';
 import 'app_theme.dart';
 import 'gen_l10n/app_localizations.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -114,6 +115,37 @@ class AuthService {
     }
   }
 
+  // AGGIUNTA: Metodo per il login con email e password
+  Future<User?> signInWithEmail(String email, String password) async {
+    try {
+      debugPrint("🔄 Tentativo di accesso con email...");
+      final UserCredential userCredential =
+          await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user == null) {
+        debugPrint("❌ Nessun utente restituito da Firebase");
+        return null;
+      }
+
+      debugPrint("🎉 Accesso riuscito! UID: ${userCredential.user!.uid}");
+
+      // Aggiorna il profilo utente (senza forzare l'inserimento del nome)
+      await UserProfile.upsertOnAuth(userCredential.user!,
+          provider: 'email', pruneUnknownKeys: true);
+
+      return userCredential.user;
+    } on FirebaseAuthException catch (e) {
+      debugPrint("🔥 FirebaseAuthException: [${e.code}] ${e.message}");
+      return null;
+    } catch (e) {
+      debugPrint("❌ Errore durante l'accesso: $e");
+      return null;
+    }
+  }
+
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
   Future<void> signOut() async {
@@ -135,6 +167,85 @@ class AuthService {
     } catch (e) {
       debugPrint("❌ Errore debug configurazione: $e");
     }
+  }
+}
+
+// MODIFICA: Cambiato da TestLoginForm a TestSignInForm e convertito per il login
+class TestSignInForm extends StatefulWidget {
+  const TestSignInForm({super.key});
+
+  @override
+  State<TestSignInForm> createState() => _TestSignInFormState();
+}
+
+class _TestSignInFormState extends State<TestSignInForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+    final authService = AuthService();
+    final user = await authService.signInWithEmail(
+      _emailController.text.trim(),
+      _passwordController.text.trim(),
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accesso fallito')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Test per Google')),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(labelText: 'Email'),
+                validator: (value) =>
+                    value!.isEmpty ? 'Inserisci l\'email' : null,
+              ),
+              TextFormField(
+                controller: _passwordController,
+                decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
+                validator: (value) =>
+                    value!.isEmpty ? 'Inserisci la password' : null,
+              ),
+              const SizedBox(height: 20),
+              _isLoading
+                  ? const CircularProgressIndicator()
+                  : FilledButton(
+                      onPressed: _submit,
+                      child: const Text('Accedi'),
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -351,8 +462,52 @@ Future<void> backgroundNotificationHandler() async {
   }
 }
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  // AGGIUNTA: Variabile per controllare lo stato del flag di testing
+  bool _showTestButton = false;
+  bool _isChecking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkTestingFlag();
+  }
+
+  // AGGIUNTA: Metodo per verificare il flag di testing su Firestore
+  Future<void> _checkTestingFlag() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('applicazioneversione')
+          .doc('informazione')
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data();
+        setState(() {
+          _showTestButton = data?['gtesting'] == true;
+          _isChecking = false;
+        });
+      } else {
+        setState(() {
+          _showTestButton = false;
+          _isChecking = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Errore nel recupero del flag gtesting: $e');
+      setState(() {
+        _showTestButton = false;
+        _isChecking = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -361,48 +516,69 @@ class LoginScreen extends StatelessWidget {
 
     return Scaffold(
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset('assets/app_logo.png', width: 120, height: 120),
-            const SizedBox(height: 40),
-            Text(
-              l10n.welcomeTitle,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Text(
-                l10n.welcomeSubtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16),
+        child: _isChecking
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset('assets/app_logo.png', width: 120, height: 120),
+                  const SizedBox(height: 40),
+                  Text(
+                    l10n.welcomeTitle,
+                    style: const TextStyle(
+                        fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 20),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Text(
+                      l10n.welcomeSubtitle,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      debugPrint("👉 Bottone di accesso premuto (Google)");
+                      final user = await authService.signInWithGoogle();
+                      if (user == null) {
+                        debugPrint("❌ Accesso Google fallito");
+                        if (!context.mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(l10n.loginFailed)),
+                        );
+                      } else {
+                        debugPrint("✅ Accesso Google riuscito, navigazione...");
+                      }
+                    },
+                    icon: Image.asset('assets/google_logo.png',
+                        width: 20, height: 20),
+                    label: Text(l10n.signInWithGoogle),
+                    style: FilledButton.styleFrom(
+                        minimumSize: const Size(280, 48)),
+                  ),
+                  // AGGIUNTA: Bottone di test condizionale
+                  if (_showTestButton) ...[
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) =>
+                                  const TestSignInForm()), // MODIFICATO: Cambiato da TestLoginForm a TestSignInForm
+                        );
+                      },
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size(280, 48)),
+                      child: const Text('Test for Google'),
+                    ),
+                  ],
+                ],
               ),
-            ),
-            const SizedBox(height: 40),
-            FilledButton.icon(
-              onPressed: () async {
-                debugPrint("👉 Bottone di accesso premuto (Google)");
-                final user = await authService.signInWithGoogle();
-                if (user == null) {
-                  debugPrint("❌ Accesso Google fallito");
-                  if (!context.mounted) {
-                    return;
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(l10n.loginFailed)),
-                  );
-                } else {
-                  debugPrint("✅ Accesso Google riuscito, navigazione...");
-                }
-              },
-              icon:
-                  Image.asset('assets/google_logo.png', width: 20, height: 20),
-              label: Text(l10n.signInWithGoogle),
-              style: FilledButton.styleFrom(minimumSize: const Size(280, 48)),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -471,7 +647,7 @@ class AuthWrapper extends StatelessWidget {
               locale: AppThemeController.instance.locale,
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
-              home: const LoginScreen(),
+              home: const VersionNoticeGate(child: LoginScreen()),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
           },
@@ -551,6 +727,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   Set<String> _blockedIds = {};
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSub;
 
+  // --------- AGGIUNTA (anti-doppio avvio) ---------
+  bool _appInitRan = false;
+  bool _initializingAudio = false;
+  bool _audioReady = false;
+  // -----------------------------------------------
+
   @override
   void initState() {
     super.initState();
@@ -573,6 +755,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     WidgetsBinding.instance.removeObserver(this);
 
     _messagesSubscription?.cancel();
+    _userDocSub?.cancel();
     _recordingTimer?.cancel();
     _cleanupTimer?.cancel();
     _countdownTimer?.cancel();
@@ -589,6 +772,9 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     } catch (e) {
       debugPrint('❌ Errore cleanup risorse: $e');
     }
+
+    // AGGIUNTA: segna audio come non pronto al prossimo mount
+    _audioReady = false;
 
     super.dispose();
   }
@@ -692,18 +878,20 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
       if (userDoc.exists) {
         final data = userDoc.data();
-        setState(() {
-          _currentUserData = data;
-          final List<dynamic> b =
-              (data?['id_bloccati'] as List<dynamic>?) ?? const [];
-          _blockedIds = b.map((e) => e.toString()).toSet();
-        });
+        // AGGIUNTA: Controllo mounted
+if (mounted) {
+  setState(() {
+    _currentUserData = data;
+    final List<dynamic> b = (data?['id_bloccati'] as List<dynamic>?) ?? const [];
+    _blockedIds = b.map((e) => e.toString()).toSet();
+  });
+}
         debugPrint("✅ Dati utente caricati: $_currentUserData");
       } else {
         debugPrint("⚠️ Documento utente non trovato per ID: $_currentUserId");
       }
     } catch (e) {
-      debugPrint('❌ Errore caricamento dati utente: $e');
+      debugPrint("❌ Errore caricamento dati utente: $e");
     }
   }
 
@@ -713,18 +901,24 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       return;
     }
     _userDocSub?.cancel();
-    _userDocSub = FirebaseFirestore.instance
-        .collection('utenti')
-        .doc(uid)
-        .snapshots()
-        .listen((snap) {
-      final data = snap.data() ?? <String, dynamic>{};
-      final List<dynamic> b =
-          (data['id_bloccati'] as List<dynamic>?) ?? const [];
-      setState(() {
-        _blockedIds = b.map((e) => e.toString()).toSet();
-      });
+ _userDocSub = FirebaseFirestore.instance
+    .collection('utenti')
+    .doc(uid)
+    .snapshots()
+    .listen((snap) {
+  final data = snap.data() ?? <String, dynamic>{};
+  final List<dynamic> b = (data['id_bloccati'] as List<dynamic>?) ?? const [];
+  
+  // AGGIUNTA: Controllo mounted prima di setState
+  if (mounted) {
+    setState(() {
+      _blockedIds = b.map((e) => e.toString()).toSet();
     });
+  } else {
+    // Se il widget è smontato, cancella la subscription
+    _userDocSub?.cancel();
+  }
+});
   }
 
   @override
@@ -764,6 +958,12 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _initializeApp() async {
+    if (_appInitRan) {
+      debugPrint('⏭️ _initializeApp già eseguito, salto');
+      return;
+    }
+    _appInitRan = true;
+
     await _initializeAudio();
     await storjService.initialize();
     await _getCurrentLocation();
@@ -771,7 +971,10 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
 
     _initializeFirestoreListener();
 
-    setState(() => _isInitialized = true);
+    // AGGIUNTA: Controllo mounted più robusto
+if (mounted) {
+  setState(() => _isInitialized = true);
+}
   }
 
   void _startTimers() {
@@ -855,8 +1058,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
           .collection('utenti')
           .doc(senderId)
           .get();
-        
-        if (!mounted) return;
+
+      if (!mounted) return;
 
       String? nome = (userSnap.data()?['nome'] as String?)?.trim();
 
@@ -971,13 +1174,25 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
   }
 
   Future<void> _initializeAudio() async {
+    if (_audioReady || _initializingAudio) {
+      debugPrint('🎙️ Sessione audio già pronta o in avvio, salto');
+      return;
+    }
+    _initializingAudio = true;
     try {
-      _recorder = FlutterSoundRecorder();
-      _player = FlutterSoundPlayer();
+      _recorder ??= FlutterSoundRecorder();
+      _player ??= FlutterSoundPlayer();
+
+      // Apri UNA SOLA VOLTA le sessioni
       await _recorder!.openRecorder();
       await _player!.openPlayer();
+
+      _audioReady = true;
+      debugPrint('🎙️ Audio session ready');
     } catch (e) {
       debugPrint('❌ Errore inizializzazione audio: $e');
+    } finally {
+      _initializingAudio = false;
     }
   }
 
@@ -1137,6 +1352,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
         _isRecording = false;
         _recordingSeconds = 0;
         _currentRecordingPath = null;
+        _isLongPressRecording = false;
+        _isWaitingForRelease = false;
       });
     }
   }
@@ -1218,15 +1435,15 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     } catch (e) {
       debugPrint('❌ Errore stop registrazione: $e');
     } finally {
-      if (!_isDisposed) {
-        setState(() {
-          _isRecording = false;
-          _recordingSeconds = 0;
-          _currentRecordingPath = null;
-          _isLongPressRecording = false;
-          _isWaitingForRelease = false;
-        });
-      }
+      // ignore: control_flow_in_finally
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _recordingSeconds = 0;
+        _currentRecordingPath = null;
+        _isLongPressRecording = false;
+        _isWaitingForRelease = false;
+      });
     }
   }
 
@@ -1299,10 +1516,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
       if (!_isMessageInRange(m)) {
         return false;
       }
-      if (!_activeFilters.contains(m.category)) {
-        return false;
-      }
-      if (!_matchesMyCustomName(m)) {
+      if (!_activeFilters.contains(m.category) || !_matchesMyCustomName(m)) {
         return false;
       }
       return true;
@@ -1468,9 +1682,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     _longPressTimer?.cancel();
     if (_isRecording) {
       if (_isLongPressRecording && _isWaitingForRelease) {
-        if (!_isDisposed) {
-          setState(() => _isWaitingForRelease = false);
-        }
+        if (!mounted) return;
+        setState(() => _isWaitingForRelease = false);
       } else {
         _stopRecording();
       }
@@ -1595,7 +1808,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     if (targetUid.isEmpty || myUid.isEmpty || targetUid == myUid) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).invalidOperation)),
+          SnackBar(
+              content: Text(AppLocalizations.of(context).invalidOperation)),
         );
       }
       return;
@@ -1717,7 +1931,8 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                   ((_customCategoryName ?? '').trim().isEmpty)) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(AppLocalizations.of(context).customCategoryWarning),
+                    content: Text(
+                        AppLocalizations.of(context).customCategoryWarning),
                   ),
                 );
               }
@@ -1770,7 +1985,6 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
             onToggleReaction: (m, emoji) => _toggleReaction(m, emoji),
             onRequestBlockUser: _confirmAndBlock,
           ),
-
           if (!_showWelcomeMessage && _currentUserData != null && _showUserInfo)
             Positioned(
               top: 60,
@@ -1781,7 +1995,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                   color: cs.surface,
                   boxShadow: [
                     BoxShadow(
-               color: Colors.black.withValues(alpha: 0.15),        
+                      color: Colors.black.withValues(alpha: 0.15),
                       blurRadius: 10,
                       spreadRadius: 2,
                     )
@@ -1853,7 +2067,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
                       AppLocalizations.of(context).userId,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                      color: cs.onSurface.withValues(alpha: 0.7),
+                        color: cs.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     SelectableText(
@@ -1914,20 +2128,33 @@ class AgeGateConfig {
 }
 
 class AgeGateStrings {
-  static String title(BuildContext context) => AppLocalizations.of(context).ageGateTitle;
-  static String subtitle(BuildContext context) => AppLocalizations.of(context).ageGateSubtitle(AgeGateConfig.minAgeYears);
-  static String dateLabel(BuildContext context) => AppLocalizations.of(context).birthDate;
-  static String datePlaceholder(BuildContext context) => AppLocalizations.of(context).selectDate;
-  static String datePickerHelp(BuildContext context) => AppLocalizations.of(context).selectBirthDate;
-  static String declaration(BuildContext context) => AppLocalizations.of(context).truthDeclaration;
-  static String falseWarning(BuildContext context) => AppLocalizations.of(context).falseWarning;
-  static String cta(BuildContext context) => AppLocalizations.of(context).confirmAndContinue;
-  static String logout(BuildContext context) => AppLocalizations.of(context).logout;
+  static String title(BuildContext context) =>
+      AppLocalizations.of(context).ageGateTitle;
+  static String subtitle(BuildContext context) =>
+      AppLocalizations.of(context).ageGateSubtitle(AgeGateConfig.minAgeYears);
+  static String dateLabel(BuildContext context) =>
+      AppLocalizations.of(context).birthDate;
+  static String datePlaceholder(BuildContext context) =>
+      AppLocalizations.of(context).selectDate;
+  static String datePickerHelp(BuildContext context) =>
+      AppLocalizations.of(context).selectBirthDate;
+  static String declaration(BuildContext context) =>
+      AppLocalizations.of(context).truthDeclaration;
+  static String falseWarning(BuildContext context) =>
+      AppLocalizations.of(context).falseWarning;
+  static String cta(BuildContext context) =>
+      AppLocalizations.of(context).confirmAndContinue;
+  static String logout(BuildContext context) =>
+      AppLocalizations.of(context).logout;
 
-  static String missingDate(BuildContext context) => AppLocalizations.of(context).missingDate;
-  static String tooYoung(BuildContext context, int years) => AppLocalizations.of(context).tooYoung(years);
-  static String mustAccept(BuildContext context) => AppLocalizations.of(context).mustAccept;
-  static String generic(BuildContext context) => AppLocalizations.of(context).genericError;
+  static String missingDate(BuildContext context) =>
+      AppLocalizations.of(context).missingDate;
+  static String tooYoung(BuildContext context, int years) =>
+      AppLocalizations.of(context).tooYoung(years);
+  static String mustAccept(BuildContext context) =>
+      AppLocalizations.of(context).mustAccept;
+  static String generic(BuildContext context) =>
+      AppLocalizations.of(context).genericError;
 }
 
 class AgeGateWrapper extends StatelessWidget {
@@ -2074,7 +2301,8 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                   Text(
                     AgeGateStrings.title(context),
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -2103,7 +2331,8 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
                         onChanged: (v) =>
                             setState(() => _accepted = v ?? false),
                       ),
-                      Expanded(child: Text(AgeGateStrings.declaration(context))),
+                      Expanded(
+                          child: Text(AgeGateStrings.declaration(context))),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -2154,6 +2383,99 @@ class _DateOfBirthScreenState extends State<DateOfBirthScreen> {
   }
 }
 
+class VersionNoticeGate extends StatefulWidget {
+  final Widget child;
+  const VersionNoticeGate({super.key, required this.child});
+
+  @override
+  State<VersionNoticeGate> createState() => _VersionNoticeGateState();
+}
+
+class _VersionNoticeGateState extends State<VersionNoticeGate> {
+  bool _tried = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShow());
+  }
+
+  Future<void> _open(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('Impossibile aprire il link: $url');
+    }
+  }
+
+  Future<void> _maybeShow() async {
+    if (!mounted || _tried) return;
+    _tried = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastShownFor = prefs.getString('version_notice_shown_for');
+      if (lastShownFor == appVersion) return;
+
+      await showDialog<void>(
+        // ignore: use_build_context_synchronously
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          final l10n = AppLocalizations.of(ctx);
+          final cs = Theme.of(ctx).colorScheme;
+          final linkStyle = TextStyle(
+            color: cs.primary,
+            decoration: TextDecoration.underline,
+          );
+
+          return AlertDialog(
+            title: Text(l10n.versionNoticeTitle),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Paragrafo principale (usa la versione richiesta 0.5)
+                  Text(l10n.versionNoticeBody('0.5')),
+                  const SizedBox(height: 16),
+                  Text(l10n.versionNoticeLinksIntro),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: () => _open(l10n.versionNoticeLink1Url),
+                    child: Text(l10n.versionNoticeLink1Label, style: linkStyle),
+                  ),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () => _open(l10n.versionNoticeLink2Url),
+                    child: Text(l10n.versionNoticeLink2Label, style: linkStyle),
+                  ),
+                ],
+              ),
+            ),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            actions: [
+              FilledButton(
+                onPressed: () async {
+                  final p = await SharedPreferences.getInstance();
+                  await p.setString('version_notice_shown_for', appVersion);
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                },
+                child: Text(l10n.confirmAndContinue),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (_) {
+      // Non bloccare l'app se qualcosa va storto
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class VoiceChatApp extends StatelessWidget {
   const VoiceChatApp({super.key});
 
@@ -2176,7 +2498,9 @@ class VoiceChatApp extends StatelessWidget {
               locale: AppThemeController.instance.locale,
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
-              home: const AgeGateWrapper(child: VoiceChatHome()),
+              home: const VersionNoticeGate(
+                child: AgeGateWrapper(child: VoiceChatHome()),
+              ),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
 
@@ -2189,7 +2513,9 @@ class VoiceChatApp extends StatelessWidget {
               locale: AppThemeController.instance.locale,
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
-              home: const AgeGateWrapper(child: VoiceChatHome()),
+              home: const VersionNoticeGate(
+                child: AgeGateWrapper(child: VoiceChatHome()),
+              ),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
 
@@ -2202,7 +2528,9 @@ class VoiceChatApp extends StatelessWidget {
               locale: AppThemeController.instance.locale,
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
-              home: const AgeGateWrapper(child: VoiceChatHome()),
+              home: const VersionNoticeGate(
+                child: AgeGateWrapper(child: VoiceChatHome()),
+              ),
               routes: {'/settings': (context) => const SettingsScreen()},
             );
         }

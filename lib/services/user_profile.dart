@@ -49,7 +49,7 @@ class UserProfileSchema {
     UserProfileKeys.provider: () => 'google',
     UserProfileKeys.email: () => null, // viene impostata dal provider
     UserProfileKeys.nome: () => 'Utente senza nome',
-    UserProfileKeys.fotoUrl: () => null,
+    UserProfileKeys.fotoUrl: () => '', // MODIFICA: default a 'senza foto' invece di null
     UserProfileKeys.dataRegistrazione: () =>
         FieldValue.serverTimestamp(), // SOLO alla creazione
     UserProfileKeys.ultimoAccesso: () =>
@@ -70,13 +70,21 @@ class UserProfileSchema {
     User user, {
     String provider = 'google',
   }) {
+    // MODIFICA: Gestione specifica per foto_url
+    String fotoUrl = user.photoURL ?? '';
+    
+    // Se l'utente accede con email/password, assicurati che foto_url non sia null
+    if (provider == 'email' && (fotoUrl.isEmpty || fotoUrl == 'null')) {
+      fotoUrl = '';
+    }
+
     return {
       // 6 principali
       UserProfileKeys.provider: provider,
       UserProfileKeys.email: user.email,
       UserProfileKeys.nome:
           user.displayName ?? defaults[UserProfileKeys.nome]!(),
-      UserProfileKeys.fotoUrl: user.photoURL,
+      UserProfileKeys.fotoUrl: fotoUrl, // Usa il valore processato
       UserProfileKeys.dataRegistrazione: FieldValue.serverTimestamp(),
       UserProfileKeys.ultimoAccesso: FieldValue.serverTimestamp(),
 
@@ -86,7 +94,7 @@ class UserProfileSchema {
       UserProfileKeys.idBloccati: defaults[UserProfileKeys.idBloccati]!(),
       UserProfileKeys.blockedNames: defaults[UserProfileKeys.blockedNames]!(),
 
-      // Età (null alla creazione, l’utente la imposta nel gate)
+      // Età (null alla creazione, l'utente la imposta nel gate)
       UserProfileKeys.dataDiNascita: defaults[UserProfileKeys.dataDiNascita]!(),
     };
   }
@@ -105,6 +113,14 @@ class UserProfile {
     final ref = FirebaseFirestore.instance.collection('utenti').doc(user.uid);
     final snap = await ref.get();
 
+    // MODIFICA: Gestione specifica per foto_url
+    String fotoUrl = user.photoURL ?? '';
+    
+    // Se l'utente accede con email/password, assicurati che foto_url non sia null
+    if (provider == 'email' && (fotoUrl.isEmpty || fotoUrl == 'null')) {
+      fotoUrl = '';
+    }
+
     if (!snap.exists) {
       await ref.set(
         UserProfileSchema.initialFromFirebaseUser(user, provider: provider),
@@ -117,7 +133,7 @@ class UserProfile {
       UserProfileKeys.email: user.email,
       UserProfileKeys.nome: user.displayName ??
           UserProfileSchema.defaults[UserProfileKeys.nome]!(),
-      UserProfileKeys.fotoUrl: user.photoURL,
+      UserProfileKeys.fotoUrl: fotoUrl, // Usa il valore processato
       UserProfileKeys.ultimoAccesso: FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
@@ -162,7 +178,7 @@ class UserProfile {
     return {UserProfileKeys.dataDiNascita: Timestamp.fromDate(dobUtc)};
   }
 
-  /// (Opzionale) Sincronizza schema on-demand per un UID specifico.
+  /// (Opzionalmente) Sincronizza schema on-demand per un UID specifico.
   static Future<void> syncSchemaWithDatabase(String uid,
       {bool pruneUnknownKeys = true}) async {
     final ref = FirebaseFirestore.instance.collection('utenti').doc(uid);

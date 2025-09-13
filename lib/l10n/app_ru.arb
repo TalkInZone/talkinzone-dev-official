@@ -338,8 +338,78 @@
     "deleteError": "Не удалось удалить сообщение",
     "@deleteError": { "description": "Уведомление когда удаление не удалось." },
     "tooltipDelete": "Удалить",
-    "@tooltipDelete": { "description": "Подсказка для значка корзины в пузыре." }
+    "@tooltipDelete": { "description": "Подсказка для значка корзины в пузыре." },
 
 
 
+
+
+
+
+
+
+
+      "versionNoticeTitle": "Уведомление о версии",
+      "@versionNoticeTitle": {
+        "description": "Заголовок диалога, объявляющего текущую версию приложения."
+      },
+    
+      "versionNoticeBody": "Это версия {version}, она сейчас является экспериментальной. Приятного использования и, если хотите, оставьте отзыв. Если обнаружите проблемы или ошибки, пишите на адрес: talkinzone@gmail.com.",
+      "@versionNoticeBody": {
+        "description": "Основной текст уведомления о версии. Содержит контактный e-mail.",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "Чтобы ознакомиться с правилами и информацией о безопасности детей, посетите:",
+      "@versionNoticeLinksIntro": {
+        "description": "Вводная фраза перед списком ссылок."
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "Подпись, отображаемая для первой ссылки."
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "Абсолютный URL первой ссылки."
+      },
+    
+      "versionNoticeLink2Label": "Стандарты безопасности детей",
+      "@versionNoticeLink2Label": {
+        "description": "Подпись, отображаемая для второй ссылки."
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=ru",
+      "@versionNoticeLink2Url": {
+        "description": "Абсолютный URL второй ссылки."
+      },
+    
+
+
+
+
+
+
+      
+        "updateRequiredTitle": "Требуется обновление",
+        "@updateRequiredTitle": { "description": "Заголовок экрана с требованием обновить приложение." },
+      
+        "updateRequiredOutdated": "Текущая версия приложения устарела.",
+        "@updateRequiredOutdated": { "description": "Сообщение о том, что установленная версия слишком старая." },
+      
+        "updateRequiredInstruction": "Чтобы продолжить использование приложения, скачайте последнюю версию из магазина.",
+        "@updateRequiredInstruction": { "description": "Инструкция по обновлению приложения из магазина." },
+      
+        "updateRequiredCurrentVersion": "Текущая версия:",
+        "@updateRequiredCurrentVersion": { "description": "Метка перед номером текущей версии." }
+      
+      
+
+
+
+
+
+
+    
   }

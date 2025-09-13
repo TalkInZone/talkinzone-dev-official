@@ -335,5 +335,63 @@
   "deleteError": "Couldn't delete message",
   "@deleteError": { "description": "Snackbar when delete fails." },
   "tooltipDelete": "Delete",
-  "@tooltipDelete": { "description": "Tooltip for the trash icon in the bubble." }
+  "@tooltipDelete": { "description": "Tooltip for the trash icon in the bubble." },
+
+
+
+
+
+
+    "versionNoticeTitle": "Version notice",
+    "@versionNoticeTitle": {
+      "description": "Title of the dialog that announces the current app version."
+    },
+  
+    "versionNoticeBody": "This is version {version} and it is currently experimental. Enjoy using it and, if you like, leave feedback. If you encounter any issues or bugs, you can contact us at talkinzone@gmail.com.",
+    "@versionNoticeBody": {
+      "description": "Main copy for the version notice. Includes the contact email in plain text.",
+      "placeholders": {
+        "version": { "type": "String" }
+      }
+    },
+  
+    "versionNoticeLinksIntro": "To review our policies and child safety information, visit:",
+    "@versionNoticeLinksIntro": {
+      "description": "Intro sentence before the list of links."
+    },
+  
+    "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+    "@versionNoticeLink1Label": {
+      "description": "Label shown for the first link."
+    },
+    "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+    "@versionNoticeLink1Url": {
+      "description": "Absolute URL for the first link."
+    },
+  
+    "versionNoticeLink2Label": "Child safety standards",
+    "@versionNoticeLink2Label": {
+      "description": "Label shown for the second link."
+    },
+    "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=en",
+    "@versionNoticeLink2Url": {
+      "description": "Absolute URL for the second link."
+    },
+
+
+      "updateRequiredTitle": "Update required",
+      "@updateRequiredTitle": { "description": "Title of the screen that requires the user to update." },
+      "updateRequiredOutdated": "The current app version is outdated.",
+      "@updateRequiredOutdated": { "description": "Message stating that the installed app is too old." },
+      "updateRequiredInstruction": "To continue using the app, download the latest version from the store.",
+      "@updateRequiredInstruction": { "description": "Instruction to update the app from the store." },
+      "updateRequiredCurrentVersion": "Current version:",
+      "@updateRequiredCurrentVersion": { "description": "Label preceding the current version number." }
+    
+
+
+
+
+
+
 }

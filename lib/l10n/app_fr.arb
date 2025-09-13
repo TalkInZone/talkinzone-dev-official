@@ -338,7 +338,77 @@
     "deleteError": "Impossible de supprimer le message",
     "@deleteError": { "description": "Snackbar quand la suppression échoue." },
     "tooltipDelete": "Supprimer",
-    "@tooltipDelete": { "description": "Info-bulle pour l'icône de corbeille dans la bulle." }
+    "@tooltipDelete": { "description": "Info-bulle pour l'icône de corbeille dans la bulle." },
+
+
+
+
+
+
+    
+      "versionNoticeTitle": "Avis de version",
+      "@versionNoticeTitle": {
+        "description": "Titre de la boîte de dialogue qui annonce la version actuelle de l’app."
+      },
+    
+      "versionNoticeBody": "Ceci est la version {version} et elle est actuellement expérimentale. Profitez-en et, si vous le souhaitez, laissez un commentaire. Si vous rencontrez des problèmes ou des bogues, vous pouvez nous contacter à l’adresse talkinzone@gmail.com.",
+      "@versionNoticeBody": {
+        "description": "Texte principal de l’avis de version. Inclut l’e-mail de contact en clair.",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "Pour consulter les politiques et la sécurité des mineurs, visitez :",
+      "@versionNoticeLinksIntro": {
+        "description": "Phrase d’introduction avant la liste des liens."
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "Libellé affiché pour le premier lien."
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "URL absolue du premier lien."
+      },
+    
+      "versionNoticeLink2Label": "Normes de sécurité des mineurs",
+      "@versionNoticeLink2Label": {
+        "description": "Libellé affiché pour le deuxième lien."
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=fr",
+      "@versionNoticeLink2Url": {
+        "description": "URL absolue du deuxième lien."
+      },
+
+
+
+
+
+
+
+
+
+
+
+      
+        "updateRequiredTitle": "Mise à jour requise",
+        "@updateRequiredTitle": { "description": "Titre de l’écran demandant la mise à jour." },
+      
+        "updateRequiredOutdated": "La version actuelle de l’application est obsolète.",
+        "@updateRequiredOutdated": { "description": "Indique que l’application installée est trop ancienne." },
+      
+        "updateRequiredInstruction": "Pour continuer à utiliser l’app, téléchargez la dernière version depuis le store.",
+        "@updateRequiredInstruction": { "description": "Instruction pour mettre à jour l’app depuis le store." },
+      
+        "updateRequiredCurrentVersion": "Version actuelle :",
+        "@updateRequiredCurrentVersion": { "description": "Libellé précédant le numéro de version actuel." }
+      
+      
+    
+    
+
 
 
 

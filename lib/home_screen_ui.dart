@@ -12,6 +12,11 @@
 //   trattiamo la cosa come successo locale (sparisce).
 // - Footer della bolla reso responsive (Wrap) per stringhe lunghe.
 // - displayCategoryLabel(ctx, category, ...) chiamata col giusto primo argomento.
+// - ✅ FIX 1: palette calcolata per-messaggio (niente recolor globale).
+// - ✅ FIX 2: i messaggi **ricevuti** hanno ora lo **sfondo** della bolla
+//   leggermente tinto col colore della **categoria del messaggio** (non solo la label).
+// - ✅ OVERRIDE "Avviso": colore distinto (violaceo #7C3AED) applicato ovunque
+//   (chip, top bar, composer, bolle e bordi).
 //
 // Dipendenze: AppLocalizations, category_utils.dart, voice_message.dart
 // =============================================================================
@@ -32,6 +37,16 @@ import 'voice_message.dart';
 Color _alpha(Color c, double opacity01) =>
     c.withAlpha(((opacity01.clamp(0.0, 1.0)) * 255).round());
 
+// 🎯 Override colore categoria "Avviso"
+Color _accentFor(MessageCategory cat) {
+  final n = cat.name.toLowerCase();
+  if (n == 'avviso') {
+    // Violaceo ben distinto dal giallo del warning
+    return const Color(0xFF7C3AED);
+  }
+  return cat.color;
+}
+
 // =============================================================================
 // ⏱ TTL & self-destruct window
 // =============================================================================
@@ -39,7 +54,7 @@ const Duration _kMessageTTL = Duration(minutes: 10);
 const Duration _kDestructWindow = Duration(seconds: 6);
 
 // =============================================================================
-// 🎨 Adaptive palette
+/* 🎨 Adaptive palette */
 // =============================================================================
 class _AdaptivePalette {
   final Color surface;
@@ -87,6 +102,7 @@ class _AdaptivePalette {
         onSurfaceAlt: c.onSurface,
         bubbleMine: _alpha((accent ?? c.primary), 0.22),
         onBubbleMine: c.onSurface,
+        // NB: bubbleOther originale neutro — non lo usiamo più per lo sfondo
         bubbleOther: _alpha(c.surfaceContainerHighest, 0.35),
         onBubbleOther: c.onSurface,
         isDark: true,
@@ -99,6 +115,7 @@ class _AdaptivePalette {
         onSurfaceAlt: cs.onSurface,
         bubbleMine: _alpha((accent ?? cs.primary), 0.12),
         onBubbleMine: cs.onSurface,
+        // NB: bubbleOther originale neutro — non lo usiamo più per lo sfondo
         bubbleOther: _alpha(cs.surfaceContainerHighest, 0.55),
         onBubbleOther: Colors.black87,
         isDark: false,
@@ -747,7 +764,8 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
         widget.textController.text.characters.length <= 250 &&
         !widget.isSendingText;
 
-    _AdaptivePalette.of(context, accent: widget.selectedCategory.color);
+    // (chiamata innocua, nessun side-effect)
+    _AdaptivePalette.of(context, accent: _accentFor(widget.selectedCategory));
 
     // Filtra quelli già rimossi localmente
     final visibleMessages = widget.filteredMessages
@@ -840,10 +858,6 @@ class _HomeScreenUIState extends State<HomeScreenUI> {
                             : _formatDistanceBucketLoc(context, d);
                       },
                       timeBuilder: (ts) => _formatRelativeWithLoc(context, ts),
-                      pal: _AdaptivePalette.of(
-                        context,
-                        accent: widget.selectedCategory.color,
-                      ),
                       reactionsBuilder: (m) {
                         final local = _localReactions[m.id];
                         if (local != null) return local;
@@ -918,7 +932,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
-    final color = selectedCategory.color;
+    final color = _accentFor(selectedCategory);
     final pal = _AdaptivePalette.of(context, accent: color);
 
     return SafeArea(
@@ -1065,8 +1079,6 @@ class _MessagesList extends StatelessWidget {
 
   final void Function(VoiceMessage, String) onToggleReaction;
 
-  final _AdaptivePalette pal;
-
   final void Function({
     required BuildContext context,
     required GlobalKey anchorKey,
@@ -1099,7 +1111,6 @@ class _MessagesList extends StatelessWidget {
     required this.distanceBuilder,
     required this.timeBuilder,
     required this.onToggleReaction,
-    required this.pal,
     required this.showReactionsOverlay,
     required this.reactionsBuilder,
     required this.isDestructing,
@@ -1287,7 +1298,7 @@ class _MessagesList extends StatelessWidget {
     }
   }
 
-  // ---------- Delete flow: avvia animazione, il resto al termine ----------
+  // ---------- Delete flow ----------
   Future<void> _confirmAndDelete(BuildContext context, VoiceMessage m) async {
     final t = AppLocalizations.of(context);
 
@@ -1312,9 +1323,7 @@ class _MessagesList extends StatelessWidget {
 
     if (!ok) return;
 
-    // 1) avvia l'animazione nella bolla
     onStartDestruct(m.id);
-    // 2) al termine (onDestructEnd) chiamiamo _finalizeDelete(...)
   }
 
   Future<void> _finalizeDelete(BuildContext context, VoiceMessage m) async {
@@ -1331,7 +1340,6 @@ class _MessagesList extends StatelessWidget {
             .showSnackBar(SnackBar(content: Text(t.deleted)));
       }
     } catch (e) {
-      // Se è già stato eliminato da qualcun altro, trattiamo come successo
       if (e is FirebaseException && e.code == 'not-found') {
         onLocallyDeleted(m.id);
         if (context.mounted) {
@@ -1340,7 +1348,6 @@ class _MessagesList extends StatelessWidget {
         }
         return;
       }
-      // Altrimenti rollback animazione
       onCancelDestruct(m.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1363,7 +1370,7 @@ class _MessagesList extends StatelessWidget {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: pal.surface,
+      backgroundColor: _AdaptivePalette.of(context).surface, // neutro
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -1458,6 +1465,10 @@ class _MessagesList extends StatelessWidget {
         final isPlaying = playingMessageId == m.id;
         final reactions = reactionsBuilder(m);
 
+        // 🎨 Palette PER-MESSAGGIO
+        final palForMessage =
+            _AdaptivePalette.of(context, accent: _accentFor(m.category));
+
         void openReactionsLocal(GlobalKey key) => showReactionsOverlay(
               context: context,
               anchorKey: key,
@@ -1477,21 +1488,15 @@ class _MessagesList extends StatelessWidget {
           onLongPress: (key) => _showMessageActions(context, m, key),
           onOpenReactions: openReactionsLocal,
           onToggleReaction: (emoji) => onToggleReaction(m, emoji),
-
-          // 🔥 click cestino → conferma → start animazione
           onDelete: () => _confirmAndDelete(context, m),
-          pal: pal,
+          pal: palForMessage,
           reactions: reactions,
-
-          // ➕ forza animazione quando richiesto (locale o remota)
           forceDestruct: isDestructing(m.id),
           onDestructEnd: (id) {
-            // Se è una delete "remota", alla fine animazione togliamo e basta
             if (isRemoteDeletion(id)) {
               onLocallyDeleted(id);
               onRemoteDeletionClear(id);
             } else {
-              // delete locale (cestino) o TTL: prova a cancellare backend
               _finalizeDelete(context, m);
             }
           },
@@ -1522,7 +1527,6 @@ class _ChatBubble extends StatefulWidget {
   final _AdaptivePalette pal;
   final Map<String, int> reactions;
 
-  // 🔥 distruzione forzata (per delete o delete remota) + callback fine animazione
   final bool forceDestruct;
   final void Function(String messageId) onDestructEnd;
 
@@ -1555,7 +1559,7 @@ class _ChatBubbleState extends State<_ChatBubble>
   late final AnimationController _destructCtrl;
   Timer? _startTimer;
   bool _started = false;
-  bool _forcedRunning = false; // true → distruzione forzata (delete/remote)
+  bool _forcedRunning = false;
 
   DateTime get _expiry => widget.message.timestamp.add(_kMessageTTL);
 
@@ -1571,8 +1575,6 @@ class _ChatBubbleState extends State<_ChatBubble>
       if (status == AnimationStatus.completed && _forcedRunning) {
         widget.onDestructEnd(widget.message.id);
       }
-      // Se la distruzione è partita per TTL (non forzata), completiamo comunque
-      // la dissolvenza: al rebuild superiore verrà chiamato onDestructEnd.
       if (status == AnimationStatus.completed && !_forcedRunning) {
         widget.onDestructEnd(widget.message.id);
       }
@@ -1585,7 +1587,6 @@ class _ChatBubbleState extends State<_ChatBubble>
   void didUpdateWidget(covariant _ChatBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Reset quando cambia messaggio/ts
     if (oldWidget.message.id != widget.message.id ||
         oldWidget.message.timestamp != widget.message.timestamp) {
       _startTimer?.cancel();
@@ -1596,23 +1597,21 @@ class _ChatBubbleState extends State<_ChatBubble>
       _scheduleDestruction();
     }
 
-    // 🔥 Trigger animazione forzata quando forceDestruct diventa true
     if (!oldWidget.forceDestruct && widget.forceDestruct) {
-      _startTimer?.cancel(); // interrompi countdown TTL
+      _startTimer?.cancel();
       _forcedRunning = true;
       _started = true;
       _destructCtrl.forward(from: 0);
       setState(() {});
     }
 
-    // Se prima era forzata e ora non più (rollback), ripristina stato
     if (oldWidget.forceDestruct && !widget.forceDestruct) {
       if (_forcedRunning) {
         _forcedRunning = false;
         _destructCtrl.stop();
         _destructCtrl.value = 0;
         _started = false;
-        _scheduleDestruction(); // riparti con logica TTL
+        _scheduleDestruction();
         setState(() {});
       }
     }
@@ -1637,7 +1636,7 @@ class _ChatBubbleState extends State<_ChatBubble>
     }
     final delay = startAt.difference(now);
     _startTimer = Timer(delay, () {
-      if (!mounted || widget.forceDestruct) return; // se parte forced, ignora
+      if (!mounted || widget.forceDestruct) return;
       _started = true;
       _destructCtrl.forward(from: 0);
       setState(() {});
@@ -1736,9 +1735,13 @@ class _ChatBubbleVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
-    final accent = message.category.color;
+    final accent = _accentFor(message.category);
 
-    final Color bubbleBg = isMine ? pal.bubbleMine : pal.bubbleOther;
+    // ✅ SFONDO TINTATO ANCHE PER I MESSAGGI RICEVUTI
+    final double mineOpacity = pal.isDark ? 0.22 : 0.12;
+    final double otherOpacity = pal.isDark ? 0.18 : 0.10;
+    final Color bubbleBg = _alpha(accent, isMine ? mineOpacity : otherOpacity);
+
     final Color textColor = isMine ? pal.onBubbleMine : pal.onBubbleOther;
 
     final alignment = isMine ? Alignment.centerRight : Alignment.centerLeft;
@@ -2545,7 +2548,7 @@ class _ComposerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
-    final color = selectedCategory.color;
+    final color = _accentFor(selectedCategory);
     final pal = _AdaptivePalette.of(context, accent: color);
 
     return SafeArea(

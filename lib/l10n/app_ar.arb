@@ -342,7 +342,72 @@
     "deleteError": "تعذر حذف الرسالة",
     "@deleteError": { "description": "شريط الإشعار عند فشل الحذف." },
     "tooltipDelete": "حذف",
-    "@tooltipDelete": { "description": "تلميح الأداة لأيقونة سلة المهملات في الفقاعة." }
+    "@tooltipDelete": { "description": "تلميح الأداة لأيقونة سلة المهملات في الفقاعة." },
+
+
+
+
+
+    
+      "versionNoticeTitle": "إشعار الإصدار",
+      "@versionNoticeTitle": {
+        "description": "Title of the dialog that announces the current app version (Arabic)."
+      },
+    
+      "versionNoticeBody": "هذا هو الإصدار {version} وهو حاليًا تجريبي. استمتع باستخدامه، وإذا رغبت، اترك ملاحظاتك. إذا واجهت أي مشاكل أو أخطاء، يمكنك التواصل معنا عبر البريد الإلكتروني: talkinzone@gmail.com.",
+      "@versionNoticeBody": {
+        "description": "Main copy for the version notice in Arabic. Includes the contact email in plain text.",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "للاطلاع على السياسات ومعلومات سلامة الأطفال، تفضل بزيارة:",
+      "@versionNoticeLinksIntro": {
+        "description": "Intro sentence before the list of links (Arabic)."
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "Label shown for the first link (Arabic UI)."
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "Absolute URL for the first link."
+      },
+    
+      "versionNoticeLink2Label": "معايير سلامة الأطفال",
+      "@versionNoticeLink2Label": {
+        "description": "Label shown for the second link (Arabic UI)."
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=ar",
+      "@versionNoticeLink2Url": {
+        "description": "Absolute URL for the second link (Arabic)."
+      },
+
+
+
+
+
+
+
+
+
+      
+        "updateRequiredTitle": "مطلوب تحديث",
+        "@updateRequiredTitle": { "description": "عنوان الشاشة التي تطلب تحديث التطبيق." },
+      
+        "updateRequiredOutdated": "إصدار التطبيق الحالي قديم.",
+        "@updateRequiredOutdated": { "description": "يشير إلى أن النسخة المثبتة قديمة جدًا." },
+      
+        "updateRequiredInstruction": "لمتابعة استخدام التطبيق، حمّل أحدث نسخة من المتجر.",
+        "@updateRequiredInstruction": { "description": "تعليمات لتحديث التطبيق من المتجر." },
+      
+        "updateRequiredCurrentVersion": "الإصدار الحالي:",
+        "@updateRequiredCurrentVersion": { "description": "تسمية تسبق رقم الإصدار الحالي." }
+      
+      
+    
 
 
 

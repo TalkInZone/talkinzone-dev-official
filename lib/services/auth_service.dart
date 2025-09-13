@@ -18,6 +18,49 @@ class AuthService {
         '282305776445-rumrd5h2kb4mt7e8g6pdkfqpjmi2sk3l.apps.googleusercontent.com',
   );
 
+  // AGGIUNTA: Metodo per il login con email e password
+  Future<User?> signInWithEmail(String email, String password) async {
+    try {
+      debugPrint("🔄 Tentativo di accesso con email: $email");
+
+      final UserCredential userCredential =
+          await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user == null) {
+        debugPrint("❌ Nessun utente restituito da Firebase");
+        return null;
+      }
+
+      debugPrint("🎉 Accesso email riuscito! UID: ${userCredential.user!.uid}");
+
+      // Processa i dati dell'utente (aggiorna last login, ecc.)
+      await _processUserData(userCredential.user!);
+
+      return userCredential.user;
+    } on FirebaseAuthException catch (e) {
+      // Gestione specifica degli errori di Firebase Auth
+      debugPrint("🔥 FirebaseAuthException: [${e.code}] ${e.message}");
+
+      if (e.code == 'user-not-found') {
+        debugPrint("❌ Nessun utente trovato con questa email");
+      } else if (e.code == 'wrong-password') {
+        debugPrint("❌ Password errata");
+      } else if (e.code == 'invalid-email') {
+        debugPrint("❌ Email non valida");
+      } else if (e.code == 'user-disabled') {
+        debugPrint("❌ Account disabilitato");
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint("❌ Errore imprevisto durante l'accesso: $e");
+      return null;
+    }
+  }
+
   Future<User?> signInWithGoogle() async {
     try {
       debugPrint("🔄 [1/6] Inizio processo autenticazione Google...");
@@ -60,12 +103,18 @@ class AuthService {
         debugPrint("❌ Errore imprevisto durante signIn: $e");
         return null;
       }
-     debugPrint("✅ Account selezionato: ${googleUser?.email ?? 'Nessuna email'}");
 
-      debugPrint("🔑 [4/6] Richiedo token di autenticazione...");
+      if (googleUser == null) {
+        debugPrint("❌ GoogleUser è null");
+        return null;
+      }
+
+      debugPrint("✅ Account selezionato: ${googleUser.email}");
+
+      debugPrint("🔑 [4/6] Richiedo token deauthentication...");
       final GoogleSignInAuthentication googleAuth;
       try {
-     googleAuth = await googleUser!.authentication;
+        googleAuth = await googleUser.authentication;
       } on PlatformException catch (e) {
         debugPrint(
           "❌ PlatformException durante auth: [${e.code}] ${e.message}",
@@ -113,7 +162,7 @@ class AuthService {
         debugPrint("🔥 FirebaseAuthException: [${e.code}] ${e.message}");
 
         if (e.code == 'account-exists-with-different-credential') {
-          debugPrint("⚠️ Account già esistente con credenziali diverse");
+          debugPrint("⚠️ Account già esistente con credenziali diversi");
         }
         if (e.code == 'invalid-credential') {
           debugPrint("🔑 Credenziali non valide o scadute");
@@ -144,20 +193,57 @@ class AuthService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_id', user.uid);
 
-      final userDoc = _firestore.collection('utenti').doc(user.uid);
+      final docRef = _firestore.collection('utenti').doc(user.uid);
+      final snap = await docRef.get();
+
+      // Mantiene la tua semantica: 'email' per password, 'google' per google
+      final providerId = user.providerData.isNotEmpty
+          ? user.providerData.first.providerId // 'password' or 'google.com'
+          : 'password';
+      final provider = (providerId == 'password') ? 'email' : 'google';
+
+      // MODIFICA: Imposta "senza foto" se il valore è null o vuoto
+      String fotoUrl = user.photoURL ?? '';
+      
+      // Se l'utente accede con email/password e photoURL è null o vuoto
+      if (provider == 'email' && (fotoUrl.isEmpty || fotoUrl == 'null')) {
+        // Imposta "senza foto" come valore predefinito
+        fotoUrl = '';
+        
+        // Aggiorna anche il profilo utente in Firebase Auth per coerenza
+        try {
+          await user.updatePhotoURL('');
+          await user.reload(); // Ricarica i dati utente aggiornati
+          debugPrint("✅ PhotoURL impostata a 'senza foto' in Firebase Auth");
+        } catch (e) {
+          debugPrint("⚠️ Impossibile aggiornare photoURL in Firebase Auth: $e");
+        }
+      }
 
       final userData = {
-        'id': user.uid,
-        'provider': 'google',
+        'provider': provider,
         'email': user.email,
-        'nome': user.displayName ?? 'Utente senza nome',
-        'foto_url': user.photoURL,
-        'data_registrazione': FieldValue.serverTimestamp(),
+        'nome': user.displayName ?? user.email?.split('@').first ?? 'Utente',
+        'foto_url': fotoUrl, // Sarà sempre una stringa non vuota
         'ultimo_accesso': FieldValue.serverTimestamp(),
       };
 
-      await userDoc.set(userData, SetOptions(merge: true));
-      debugPrint('✅ Dati utente salvati correttamente');
+      if (!snap.exists) {
+        // CREATE: rispetta le regole -> include data_registrazione e provider, nessuna chiave non ammessa
+        await docRef.set({
+          ...userData,
+          'data_registrazione': FieldValue.serverTimestamp(),
+          'status': 'attivo',
+          'like_totali': 0,
+          'id_bloccati': [],
+          'blocked_names': {},
+        }, SetOptions(merge: false));
+      } else {
+        // UPDATE: NON tocca data_registrazione (vietato dalle regole)
+        await docRef.update(userData);
+      }
+
+      debugPrint('✅ Dati utente salvati correttamente. foto_url: "$fotoUrl"');
     } catch (e, stack) {
       debugPrint('❌ Errore salvataggio dati utente: $e');
       if (kDebugMode) {
@@ -175,7 +261,7 @@ class AuthService {
       await _googleSignIn.signOut();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_id');
-      debugPrint("✅ Disconnessione completata");
+      debugPrint("✅ Disconnessione completada");
     } catch (e, stack) {
       debugPrint("❌ Errore durante la disconnessione: $e");
       if (kDebugMode) {

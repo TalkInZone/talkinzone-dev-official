@@ -335,5 +335,70 @@
   "deleteError": "Impossibile eliminare il messaggio",
   "@deleteError": { "description": "Snackbar quando l’eliminazione fallisce." },
   "tooltipDelete": "Elimina",
-  "@tooltipDelete": { "description": "Tooltip sull’icona del cestino nella nuvoletta." }
+  "@tooltipDelete": { "description": "Tooltip sull’icona del cestino nella nuvoletta." },
+
+
+
+
+
+
+  
+  
+    "versionNoticeTitle": "Nota sulla versione",
+    "@versionNoticeTitle": {
+      "description": "Titolo della finestra che annuncia la versione corrente."
+    },
+  
+    "versionNoticeBody": "Questa è la versione {version} ed è attualmente sperimentale. Divertiti a utilizzarla e, se ti va, lascia un feedback. Se riscontri problemi o bug puoi scrivere a talkinzone@gmail.com.",
+    "@versionNoticeBody": {
+      "description": "Testo principale della comunicazione versione. Include email di contatto in chiaro.",
+      "placeholders": {
+        "version": { "type": "String" }
+      }
+    },
+  
+    "versionNoticeLinksIntro": "Per consultare le normative e la sicurezza sui minori, visita:",
+    "@versionNoticeLinksIntro": {
+      "description": "Frase introduttiva prima dell'elenco dei link."
+    },
+  
+    "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+    "@versionNoticeLink1Label": {
+      "description": "Etichetta mostrata per il primo link."
+    },
+    "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+    "@versionNoticeLink1Url": {
+      "description": "URL assoluto del primo link."
+    },
+  
+    "versionNoticeLink2Label": "Standard sicurezza minori",
+    "@versionNoticeLink2Label": {
+      "description": "Etichetta mostrata per il secondo link."
+    },
+    "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=it",
+    "@versionNoticeLink2Url": {
+      "description": "URL assoluto del secondo link."
+    },
+
+
+
+
+    
+      "updateRequiredTitle": "Aggiornamento richiesto",
+      "@updateRequiredTitle": { "description": "Titolo della schermata che richiede l'aggiornamento." },
+      "updateRequiredOutdated": "La versione attuale dell'applicazione è obsoleta.",
+      "@updateRequiredOutdated": { "description": "Messaggio che indica che l'app installata è troppo vecchia." },
+      "updateRequiredInstruction": "Per continuare a utilizzare l'app, scarica l'ultima versione disponibile dallo store.",
+      "@updateRequiredInstruction": { "description": "Istruzione per aggiornare l'app dallo store." },
+      "updateRequiredCurrentVersion": "Versione attuale:",
+      "@updateRequiredCurrentVersion": { "description": "Etichetta che precede il numero di versione corrente." }
+    
+    
+
+
+
+
+
+
+
 }

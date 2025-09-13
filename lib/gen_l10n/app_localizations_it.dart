@@ -468,4 +468,44 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get tooltipDelete => 'Elimina';
+
+  @override
+  String get versionNoticeTitle => 'Nota sulla versione';
+
+  @override
+  String versionNoticeBody(String version) {
+    return 'Questa è la versione $version ed è attualmente sperimentale. Divertiti a utilizzarla e, se ti va, lascia un feedback. Se riscontri problemi o bug puoi scrivere a talkinzone@gmail.com.';
+  }
+
+  @override
+  String get versionNoticeLinksIntro =>
+      'Per consultare le normative e la sicurezza sui minori, visita:';
+
+  @override
+  String get versionNoticeLink1Label => 'talkinzone-normative.vercel.app';
+
+  @override
+  String get versionNoticeLink1Url =>
+      'https://talkinzone-normative.vercel.app/';
+
+  @override
+  String get versionNoticeLink2Label => 'Standard sicurezza minori';
+
+  @override
+  String get versionNoticeLink2Url =>
+      'https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=it';
+
+  @override
+  String get updateRequiredTitle => 'Aggiornamento richiesto';
+
+  @override
+  String get updateRequiredOutdated =>
+      'La versione attuale dell\'applicazione è obsoleta.';
+
+  @override
+  String get updateRequiredInstruction =>
+      'Per continuare a utilizzare l\'app, scarica l\'ultima versione disponibile dallo store.';
+
+  @override
+  String get updateRequiredCurrentVersion => 'Versione attuale:';
 }

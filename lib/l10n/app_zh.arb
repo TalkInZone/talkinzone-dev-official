@@ -339,7 +339,77 @@
     "deleteError": "无法删除消息",
     "@deleteError": { "description": "删除失败时的提示条。" },
     "tooltipDelete": "删除",
-    "@tooltipDelete": { "description": "气泡中垃圾桶图标的工具提示。" }
+    "@tooltipDelete": { "description": "气泡中垃圾桶图标的工具提示。" },
+
+
+
+
+
+
+
+
+    
+      "versionNoticeTitle": "版本说明",
+      "@versionNoticeTitle": {
+        "description": "用于提示当前应用版本的对话框标题。"
+      },
+    
+      "versionNoticeBody": "这是 {version} 版本，目前处于试验阶段。欢迎体验；如果愿意，欢迎留下反馈。若遇到问题或漏洞（bug），可发送邮件至：talkinzone@gmail.com。",
+      "@versionNoticeBody": {
+        "description": "版本说明正文（包含联系邮箱）。",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "要查看政策与未成年人安全信息，请访问：",
+      "@versionNoticeLinksIntro": {
+        "description": "链接列表前的引导句。"
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "第一个链接显示的标签。"
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "第一个链接的绝对 URL。"
+      },
+    
+      "versionNoticeLink2Label": "未成年人安全标准",
+      "@versionNoticeLink2Label": {
+        "description": "第二个链接显示的标签。"
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=zh",
+      "@versionNoticeLink2Url": {
+        "description": "第二个链接的绝对 URL。"
+      },
+    
+  
+
+
+
+
+
+
+
+      
+        "updateRequiredTitle": "需要更新",
+        "@updateRequiredTitle": { "description": "提示必须更新的屏幕标题。" },
+      
+        "updateRequiredOutdated": "当前应用版本已过期。",
+        "@updateRequiredOutdated": { "description": "表示已安装的应用版本过旧。" },
+      
+        "updateRequiredInstruction": "若要继续使用，请从商店下载最新版本。",
+        "@updateRequiredInstruction": { "description": "从商店更新应用的说明。" },
+      
+        "updateRequiredCurrentVersion": "当前版本：",
+        "@updateRequiredCurrentVersion": { "description": "当前版本号前的标签。" }
+      
+      
+
+
+
 
 
 

@@ -341,7 +341,74 @@
     "deleteError": "Nachricht konnte nicht gelöscht werden",
     "@deleteError": { "description": "Snackbar wenn das Löschen fehlschlägt." },
     "tooltipDelete": "Löschen",
-    "@tooltipDelete": { "description": "Tooltip für das Papierkorb-Symbol in der Blase." }
+    "@tooltipDelete": { "description": "Tooltip für das Papierkorb-Symbol in der Blase." },
+
+
+
+
+
+
+
+
+
+      "versionNoticeTitle": "Versionshinweis",
+      "@versionNoticeTitle": {
+        "description": "Titel des Dialogs, der die aktuelle App-Version ankündigt."
+      },
+    
+      "versionNoticeBody": "Dies ist Version {version} und sie ist derzeit experimentell. Viel Spaß bei der Nutzung und hinterlasse gern Feedback. Wenn du Probleme oder Bugs findest, kannst du uns unter talkinzone@gmail.com kontaktieren.",
+      "@versionNoticeBody": {
+        "description": "Haupttext für den Versionshinweis. Enthält die Kontakt-E-Mail im Klartext.",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "Unsere Richtlinien und Informationen zum Kinderschutz findest du hier:",
+      "@versionNoticeLinksIntro": {
+        "description": "Einleitungssatz vor der Linkliste."
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "Angezeigte Beschriftung für den ersten Link."
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "Absolute URL für den ersten Link."
+      },
+    
+      "versionNoticeLink2Label": "Kinderschutz-Standards",
+      "@versionNoticeLink2Label": {
+        "description": "Angezeigte Beschriftung für den zweiten Link."
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=de",
+      "@versionNoticeLink2Url": {
+        "description": "Absolute URL für den zweiten Link."
+      },
+    
+
+
+
+
+
+      
+        "updateRequiredTitle": "Aktualisierung erforderlich",
+        "@updateRequiredTitle": { "description": "Titel des Bildschirms, der ein Update verlangt." },
+      
+        "updateRequiredOutdated": "Die aktuelle App-Version ist veraltet.",
+        "@updateRequiredOutdated": { "description": "Hinweis, dass die installierte App zu alt ist." },
+      
+        "updateRequiredInstruction": "Um die App weiter zu verwenden, lade die neueste Version aus dem Store herunter.",
+        "@updateRequiredInstruction": { "description": "Anweisung, die App im Store zu aktualisieren." },
+      
+        "updateRequiredCurrentVersion": "Aktuelle Version:",
+        "@updateRequiredCurrentVersion": { "description": "Beschriftung vor der aktuellen Versionsnummer." }
+      
+      
+
+
+
 
 
   }

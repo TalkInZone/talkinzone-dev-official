@@ -457,4 +457,42 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get tooltipDelete => '削除';
+
+  @override
+  String get versionNoticeTitle => 'バージョンのお知らせ';
+
+  @override
+  String versionNoticeBody(String version) {
+    return 'これはバージョン $version で、現在は実験版です。ぜひお試しのうえ、よろしければフィードバックをお寄せください。問題やバグを見つけた場合は、talkinzone@gmail.com までご連絡ください。';
+  }
+
+  @override
+  String get versionNoticeLinksIntro => '各種ポリシーおよび未成年者の安全に関する情報は次をご覧ください:';
+
+  @override
+  String get versionNoticeLink1Label => 'talkinzone-normative.vercel.app';
+
+  @override
+  String get versionNoticeLink1Url =>
+      'https://talkinzone-normative.vercel.app/';
+
+  @override
+  String get versionNoticeLink2Label => '未成年者の安全基準';
+
+  @override
+  String get versionNoticeLink2Url =>
+      'https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=ja';
+
+  @override
+  String get updateRequiredTitle => 'アップデートが必要です';
+
+  @override
+  String get updateRequiredOutdated => '現在のアプリのバージョンは古くなっています。';
+
+  @override
+  String get updateRequiredInstruction =>
+      '引き続き利用するには、ストアから最新バージョンをダウンロードしてください。';
+
+  @override
+  String get updateRequiredCurrentVersion => '現在のバージョン：';
 }

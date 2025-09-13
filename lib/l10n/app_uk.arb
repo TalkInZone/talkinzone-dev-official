@@ -339,7 +339,89 @@
     "deleteError": "Не вдалося видалити повідомлення",
     "@deleteError": { "description": "Повідомлення коли видалення не вдалося." },
     "tooltipDelete": "Видалити",
-    "@tooltipDelete": { "description": "Підказка для значка кошика в бульбашці." }
+    "@tooltipDelete": { "description": "Підказка для значка кошика в бульбашці." },
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+      "versionNoticeTitle": "Повідомлення про версію",
+      "@versionNoticeTitle": {
+        "description": "Заголовок діалогу, який оголошує поточну версію застосунку."
+      },
+    
+      "versionNoticeBody": "Це версія {version}, і наразі вона експериментальна. Користуйтеся із задоволенням і, якщо бажаєте, залиште відгук. Якщо виникнуть проблеми або помилки, напишіть на адресу: talkinzone@gmail.com.",
+      "@versionNoticeBody": {
+        "description": "Основний текст повідомлення про версію. Містить контактний e-mail.",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "Щоб переглянути політики та інформацію щодо безпеки неповнолітніх, відвідайте:",
+      "@versionNoticeLinksIntro": {
+        "description": "Вступне речення перед списком посилань."
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "Мітка, що відображається для першого посилання."
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "Абсолютна URL-адреса першого посилання."
+      },
+    
+      "versionNoticeLink2Label": "Стандарти безпеки дітей",
+      "@versionNoticeLink2Label": {
+        "description": "Мітка, що відображається для другого посилання."
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=uk",
+      "@versionNoticeLink2Url": {
+        "description": "Абсолютна URL-адреса другого посилання."
+      },
+
+
+
+
+
+
+
+
+
+
+
+      
+        "updateRequiredTitle": "Потрібне оновлення",
+        "@updateRequiredTitle": { "description": "Заголовок екрана, що вимагає оновлення додатка." },
+      
+        "updateRequiredOutdated": "Поточна версія застосунку застаріла.",
+        "@updateRequiredOutdated": { "description": "Повідомлення, що встановлена версія надто стара." },
+      
+        "updateRequiredInstruction": "Щоб і надалі користуватися застосунком, завантажте останню версію з магазину.",
+        "@updateRequiredInstruction": { "description": "Інструкція оновити застосунок у магазині." },
+      
+        "updateRequiredCurrentVersion": "Поточна версія:",
+        "@updateRequiredCurrentVersion": { "description": "Напис перед номером поточної версії." }
+      
+      
+
+
+
+
+
+
+
+
 
 
   }

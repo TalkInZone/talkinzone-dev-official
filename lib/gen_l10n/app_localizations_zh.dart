@@ -456,4 +456,41 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get tooltipDelete => '删除';
+
+  @override
+  String get versionNoticeTitle => '版本说明';
+
+  @override
+  String versionNoticeBody(String version) {
+    return '这是 $version 版本，目前处于试验阶段。欢迎体验；如果愿意，欢迎留下反馈。若遇到问题或漏洞（bug），可发送邮件至：talkinzone@gmail.com。';
+  }
+
+  @override
+  String get versionNoticeLinksIntro => '要查看政策与未成年人安全信息，请访问：';
+
+  @override
+  String get versionNoticeLink1Label => 'talkinzone-normative.vercel.app';
+
+  @override
+  String get versionNoticeLink1Url =>
+      'https://talkinzone-normative.vercel.app/';
+
+  @override
+  String get versionNoticeLink2Label => '未成年人安全标准';
+
+  @override
+  String get versionNoticeLink2Url =>
+      'https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=zh';
+
+  @override
+  String get updateRequiredTitle => '需要更新';
+
+  @override
+  String get updateRequiredOutdated => '当前应用版本已过期。';
+
+  @override
+  String get updateRequiredInstruction => '若要继续使用，请从商店下载最新版本。';
+
+  @override
+  String get updateRequiredCurrentVersion => '当前版本：';
 }

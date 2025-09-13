@@ -985,6 +985,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete'**
   String get tooltipDelete;
+
+  /// Title of the dialog that announces the current app version.
+  ///
+  /// In en, this message translates to:
+  /// **'Version notice'**
+  String get versionNoticeTitle;
+
+  /// Main copy for the version notice. Includes the contact email in plain text.
+  ///
+  /// In en, this message translates to:
+  /// **'This is version {version} and it is currently experimental. Enjoy using it and, if you like, leave feedback. If you encounter any issues or bugs, you can contact us at talkinzone@gmail.com.'**
+  String versionNoticeBody(String version);
+
+  /// Intro sentence before the list of links.
+  ///
+  /// In en, this message translates to:
+  /// **'To review our policies and child safety information, visit:'**
+  String get versionNoticeLinksIntro;
+
+  /// Label shown for the first link.
+  ///
+  /// In en, this message translates to:
+  /// **'talkinzone-normative.vercel.app'**
+  String get versionNoticeLink1Label;
+
+  /// Absolute URL for the first link.
+  ///
+  /// In en, this message translates to:
+  /// **'https://talkinzone-normative.vercel.app/'**
+  String get versionNoticeLink1Url;
+
+  /// Label shown for the second link.
+  ///
+  /// In en, this message translates to:
+  /// **'Child safety standards'**
+  String get versionNoticeLink2Label;
+
+  /// Absolute URL for the second link.
+  ///
+  /// In en, this message translates to:
+  /// **'https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=en'**
+  String get versionNoticeLink2Url;
+
+  /// Title of the screen that requires the user to update.
+  ///
+  /// In en, this message translates to:
+  /// **'Update required'**
+  String get updateRequiredTitle;
+
+  /// Message stating that the installed app is too old.
+  ///
+  /// In en, this message translates to:
+  /// **'The current app version is outdated.'**
+  String get updateRequiredOutdated;
+
+  /// Instruction to update the app from the store.
+  ///
+  /// In en, this message translates to:
+  /// **'To continue using the app, download the latest version from the store.'**
+  String get updateRequiredInstruction;
+
+  /// Label preceding the current version number.
+  ///
+  /// In en, this message translates to:
+  /// **'Current version:'**
+  String get updateRequiredCurrentVersion;
 }
 
 class _AppLocalizationsDelegate

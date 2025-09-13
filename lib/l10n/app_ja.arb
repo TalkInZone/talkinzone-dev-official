@@ -338,7 +338,74 @@
     "deleteError": "メッセージを削除できませんでした",
     "@deleteError": { "description": "削除に失敗した時のスナックバー。" },
     "tooltipDelete": "削除",
-    "@tooltipDelete": { "description": "バブル内のゴミ箱アイコンのツールチップ。" }
+    "@tooltipDelete": { "description": "バブル内のゴミ箱アイコンのツールチップ。" },
+
+
+
+
+
+
+
+    
+    
+      "versionNoticeTitle": "バージョンのお知らせ",
+      "@versionNoticeTitle": {
+        "description": "現在のアプリのバージョンを知らせるダイアログのタイトル。"
+      },
+    
+      "versionNoticeBody": "これはバージョン {version} で、現在は実験版です。ぜひお試しのうえ、よろしければフィードバックをお寄せください。問題やバグを見つけた場合は、talkinzone@gmail.com までご連絡ください。",
+      "@versionNoticeBody": {
+        "description": "バージョン告知の本文（連絡先メールを含む）。",
+        "placeholders": {
+          "version": { "type": "String" }
+        }
+      },
+    
+      "versionNoticeLinksIntro": "各種ポリシーおよび未成年者の安全に関する情報は次をご覧ください:",
+      "@versionNoticeLinksIntro": {
+        "description": "リンク一覧の前に表示する導入文。"
+      },
+    
+      "versionNoticeLink1Label": "talkinzone-normative.vercel.app",
+      "@versionNoticeLink1Label": {
+        "description": "最初のリンクに表示するラベル。"
+      },
+      "versionNoticeLink1Url": "https://talkinzone-normative.vercel.app/",
+      "@versionNoticeLink1Url": {
+        "description": "最初のリンクの絶対URL。"
+      },
+    
+      "versionNoticeLink2Label": "未成年者の安全基準",
+      "@versionNoticeLink2Label": {
+        "description": "2つ目のリンクに表示するラベル。"
+      },
+      "versionNoticeLink2Url": "https://talkinzone-normative.vercel.app/standard_sicurezza_minori.html?lang=ja",
+      "@versionNoticeLink2Url": {
+        "description": "2つ目のリンクの絶対URL。"
+      },
+    
+    
+
+    
+
+
+
+
+
+      
+        "updateRequiredTitle": "アップデートが必要です",
+        "@updateRequiredTitle": { "description": "アップデートが必要であることを示す画面タイトル。" },
+      
+        "updateRequiredOutdated": "現在のアプリのバージョンは古くなっています。",
+        "@updateRequiredOutdated": { "description": "インストールされているバージョンが古いことを知らせるメッセージ。" },
+      
+        "updateRequiredInstruction": "引き続き利用するには、ストアから最新バージョンをダウンロードしてください。",
+        "@updateRequiredInstruction": { "description": "ストアでアプリを更新するよう案内する文章。" },
+      
+        "updateRequiredCurrentVersion": "現在のバージョン：",
+        "@updateRequiredCurrentVersion": { "description": "現在のバージョン番号の前に表示するラベル。" }
+      
+      
 
 
 
