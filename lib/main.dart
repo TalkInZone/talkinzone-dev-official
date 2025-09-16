@@ -15,7 +15,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'settings.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:workmanager/workmanager.dart';
-import 'services/storj_service.dart';
+import 'services/cloudflare_r2_service.dart';
 import 'update_required_screen.dart';
 import 'category_utils.dart';
 import 'home_screen_ui.dart';
@@ -309,7 +309,7 @@ Future<void> backgroundNotificationHandler() async {
         .where('timestamp', isLessThan: Timestamp.fromDate(fiveMinutesAgo))
         .get();
 
-    final storjService = StorjService();
+    final storjService = CloudflareR2Service();
     await storjService.initialize();
 
     for (final doc in expiredMessages.docs) {
@@ -668,7 +668,7 @@ class _VoiceChatHomeState extends State<VoiceChatHome>
     with WidgetsBindingObserver {
   FlutterSoundRecorder? _recorder;
   FlutterSoundPlayer? _player;
-  final StorjService storjService = StorjService();
+ final CloudflareR2Service storjService = CloudflareR2Service();
 
   bool _isRecording = false;
   bool _isPlaying = false;
@@ -2594,7 +2594,7 @@ Future<void> _runStartupCleanup() async {
         .where('timestamp', isLessThan: Timestamp.fromDate(fiveMinutesAgo))
         .get();
 
-    final storjService = StorjService();
+    final storjService = CloudflareR2Service();
     await storjService.initialize();
 
     for (final doc in expiredMessages.docs) {
